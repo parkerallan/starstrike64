@@ -1,0 +1,5 @@
+/filesystem
+/build
+*.eeprom
+*.pak
+*.z64

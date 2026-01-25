@@ -20,7 +20,7 @@ Level5 level5;
 rdpq_font_t* builtin_font;
 
 // Debug: Set starting scene (0 = INTRO, 1-5 = LEVEL_1 through LEVEL_5)
-#define START_SCENE 5
+#define START_SCENE 1
 
 GameScene current_scene = SCENE_INTRO;
 

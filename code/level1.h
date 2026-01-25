@@ -5,6 +5,9 @@
 #include <t3d/t3d.h>
 #include <t3d/t3dmodel.h>
 #include "animationsystem.h"
+#include "playercontrols.h"
+#include "outfitsystem.h"
+#include "projectilesystem.h"
 
 typedef struct {
     T3DViewport viewport;
@@ -21,6 +24,15 @@ typedef struct {
     T3DSkeleton* stars_skeleton;
     AnimationSystem stars_anim_system;
     T3DMat4FP* starsMat;
+    
+    // Player controls
+    PlayerControls player_controls;
+    
+    // Outfit system
+    OutfitSystem outfit_system;
+    
+    // Projectile system
+    ProjectileSystem projectile_system;
     
     // Lighting
     uint8_t colorAmbient[4];

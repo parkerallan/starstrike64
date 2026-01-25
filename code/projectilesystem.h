@@ -5,6 +5,7 @@
 #include <libdragon.h>
 #include <t3d/t3d.h>
 #include <t3d/t3dmodel.h>
+#include "collisionsystem.h"
 
 #define MAX_PROJECTILES 32
 
@@ -22,6 +23,7 @@ typedef struct {
     float lifetime;
     bool active;
     ProjectileType type;
+    int damage;  // Damage dealt on hit
 } Projectile;
 
 // Projectile system
@@ -32,14 +34,14 @@ typedef struct {
     
     float projectile_speed;
     float projectile_lifetime;
-    float shoot_cooldown;
-    float cooldown_timer;
+    float shoot_cooldowns[PROJECTILE_TYPE_COUNT];
+    float cooldown_timers[PROJECTILE_TYPE_COUNT];
     
     bool initialized;
 } ProjectileSystem;
 
 // Initialize the projectile system
-void projectile_system_init(ProjectileSystem* ps, float speed, float lifetime, float cooldown);
+void projectile_system_init(ProjectileSystem* ps, float speed, float lifetime, float normal_cooldown, float slash_cooldown);
 
 // Cleanup the projectile system
 void projectile_system_cleanup(ProjectileSystem* ps);
@@ -50,10 +52,16 @@ void projectile_system_spawn(ProjectileSystem* ps, T3DVec3 position, T3DVec3 dir
 // Update all projectiles
 void projectile_system_update(ProjectileSystem* ps, float delta_time);
 
+// Update all projectiles with collision checking
+void projectile_system_update_with_collision(ProjectileSystem* ps, float delta_time, CollisionSystem* collision, bool* enemy_hit, bool* player_hit, float* enemy_timer, float* player_timer);
+
 // Render all projectiles
 void projectile_system_render(ProjectileSystem* ps);
 
 // Check if can shoot (cooldown expired)
-bool projectile_system_can_shoot(const ProjectileSystem* ps);
+bool projectile_system_can_shoot(const ProjectileSystem* ps, ProjectileType type);
+
+// Get the damage dealt by the last projectile hit
+int projectile_system_get_last_damage(void);
 
 #endif // PROJECTILESYSTEM_H

@@ -42,6 +42,22 @@ void level2_init(Level2* level, rdpq_font_t* font) {
     level->marsMat = malloc_uncached(sizeof(T3DMat4FP));
     t3d_mat4fp_identity(level->marsMat);
     
+    // Load enemy model
+    level->enemy_model = t3d_model_load("rom:/enemy1.t3dm");
+    if (!level->enemy_model) {
+        debugf("WARNING: Failed to load enemy1 model\n");
+    } else {
+        debugf("Successfully loaded enemy1 model\n");
+    }
+    
+    // Allocate enemy matrix
+    level->enemyMat = malloc_uncached(sizeof(T3DMat4FP));
+    // Position enemy in front of player
+    float enemy_scale[3] = {1.0f, 1.0f, 1.0f};
+    float enemy_rotation[3] = {0.0f, 0.0f, 0.0f};
+    float enemy_position[3] = {0.0f, -150.0f, -200.0f};
+    t3d_mat4fp_from_srt_euler(level->enemyMat, enemy_scale, enemy_rotation, enemy_position);
+    
     // Initialize player controls with boundaries
     T3DVec3 start_pos = {{0.0f, -150.0f, 0.0f}};
     PlayerBoundary boundary = {
@@ -57,8 +73,28 @@ void level2_init(Level2* level, rdpq_font_t* font) {
     // Initialize outfit system
     outfit_system_init(&level->outfit_system);
     
-    // Initialize projectile system (speed: 400, lifetime: 3s, cooldown: 0.2s)
-    projectile_system_init(&level->projectile_system, 400.0f, 3.0f, 0.2f);
+    // Initialize projectile system (speed: 400, lifetime: 3s, normal_cooldown: 0.2s, slash_cooldown: 1.5f)
+    projectile_system_init(&level->projectile_system, 1000.0f, 3.0f, 0.2f, 1.5f);
+    
+    // Initialize collision system
+    collision_system_init(&level->collision_system);
+    
+    // Extract collision boxes from models
+    collision_system_extract_from_model(&level->collision_system, level->mecha_model, "PLAYER_", COLLISION_PLAYER);
+    collision_system_extract_from_model_with_offset(&level->collision_system, level->enemy_model, "ENEMY_", COLLISION_ENEMY, 0.0f, -150.0f, -200.0f);
+    
+    // Initialize enemy system with health from collision box name
+    int enemy_health = collision_system_get_enemy_health(&level->collision_system);
+    enemy_system_init(&level->enemy_system, enemy_health);
+    
+    debugf("Collision system initialized with %d boxes\n", level->collision_system.count);
+    debugf("Enemy health: %d\n", enemy_health);
+    
+    // Initialize hit display
+    level->show_enemy_hit = false;
+    level->show_player_hit = false;
+    level->enemy_hit_timer = 0.0f;
+    level->player_hit_timer = 0.0f;
     
     level->font = font;
     rdpq_text_register_font(1, level->font);
@@ -100,11 +136,26 @@ int level2_update(Level2* level) {
     // Update outfit system
     outfit_system_update(&level->outfit_system, delta_time);
     
-    // Update projectile system
-    projectile_system_update(&level->projectile_system, delta_time);
+    // Update enemy system (handles hit detection and health)
+    int damage = projectile_system_get_last_damage();
+    if (damage == 0) damage = 1;  // Default to 1 if no damage stored
+    enemy_system_update(&level->enemy_system, delta_time, &level->show_enemy_hit, &level->enemy_hit_timer, &level->collision_system, damage);
+    
+    // Update player hit timer
+    if (level->player_hit_timer > 0.0f) {
+        level->player_hit_timer -= delta_time;
+        if (level->player_hit_timer <= 0.0f) {
+            level->show_player_hit = false;
+        }
+    }
+    
+    // Update projectile system with collision detection
+    projectile_system_update_with_collision(&level->projectile_system, delta_time, &level->collision_system, 
+                                            &level->show_enemy_hit, &level->show_player_hit,
+                                            &level->enemy_hit_timer, &level->player_hit_timer);
     
     // A button - shoot slash projectile (hold for continuous fire)
-    if (btn_held.a && projectile_system_can_shoot(&level->projectile_system)) {
+    if (btn_held.a && projectile_system_can_shoot(&level->projectile_system, PROJECTILE_SLASH)) {
         T3DVec3 player_pos = playercontrols_get_position(&level->player_controls);
         T3DVec3 spawn_pos = {{player_pos.v[0], player_pos.v[1] + 100.0f, player_pos.v[2]}};
         T3DVec3 shoot_direction = {{0.0f, 0.0f, -1.0f}};
@@ -114,16 +165,13 @@ int level2_update(Level2* level) {
     }
     
     // B button - shoot normal projectile (hold for continuous fire)
-    if (btn_held.b && projectile_system_can_shoot(&level->projectile_system)) {
+    if (btn_held.b && projectile_system_can_shoot(&level->projectile_system, PROJECTILE_NORMAL)) {
         T3DVec3 player_pos = playercontrols_get_position(&level->player_controls);
         // Offset spawn position to the right and higher (where gun would be)
         T3DVec3 spawn_pos = {{player_pos.v[0], player_pos.v[1] + 100.0f, player_pos.v[2]}};
         T3DVec3 shoot_direction = {{0.0f, 0.0f, -1.0f}};  // Forward direction
         projectile_system_spawn(&level->projectile_system, spawn_pos, shoot_direction, PROJECTILE_NORMAL);
     }
-    
-    // Update projectile system
-    projectile_system_update(&level->projectile_system, delta_time);
     
     // if (btn.start) return LEVEL_3;
     // if (btn.b) return LEVEL_1;
@@ -168,6 +216,36 @@ void level2_render(Level2* level) {
         t3d_matrix_pop(1);
     }
     
+    // Draw enemy model if loaded and active
+    if (level->enemy_model && enemy_system_is_active(&level->enemy_system)) {
+        // Apply red lighting if flashing
+        if (enemy_system_is_flashing(&level->enemy_system)) {
+            uint8_t flashColor[4] = {255, 80, 80, 0xFF};
+            t3d_light_set_ambient(flashColor);
+            t3d_light_set_directional(0, flashColor, &level->lightDirVec);
+        }
+        
+        t3d_matrix_push(level->enemyMat);
+        
+        T3DModelDrawConf enemyDrawConf = {
+            .userData = NULL,
+            .tileCb = NULL,
+            .filterCb = NULL,
+            .dynTextureCb = NULL,
+            .matrices = NULL
+        };
+        
+        t3d_model_draw_custom(level->enemy_model, enemyDrawConf);
+        
+        t3d_matrix_pop(1);
+        
+        // Restore normal lighting
+        if (enemy_system_is_flashing(&level->enemy_system)) {
+            t3d_light_set_ambient(level->colorAmbient);
+            t3d_light_set_directional(0, level->colorDir, &level->lightDirVec);
+        }
+    }
+    
     if (level->mecha_model) {
         t3d_matrix_push(level->modelMat);
         T3DModelDrawConf drawConf = {
@@ -186,8 +264,6 @@ void level2_render(Level2* level) {
     
     rdpq_sync_pipe();
     rdpq_text_printf(NULL, 1, 10, 10, "MARS");
-    //rdpq_text_printf(NULL, 1, 10, 30, "Start: Level 3  B: Level 1");
-    
     rdpq_detach_show();
 }
 
@@ -208,8 +284,13 @@ void level2_cleanup(Level2* level) {
     
     if (level->mecha_model) t3d_model_free(level->mecha_model);
     if (level->mars_model) t3d_model_free(level->mars_model);
+    if (level->enemy_model) t3d_model_free(level->enemy_model);
     if (level->modelMat) free_uncached(level->modelMat);
     if (level->marsMat) free_uncached(level->marsMat);
+    if (level->enemyMat) free_uncached(level->enemyMat);
     projectile_system_cleanup(&level->projectile_system);
+    
+    collision_system_cleanup(&level->collision_system);
+    
     rdpq_text_unregister_font(1);
 }

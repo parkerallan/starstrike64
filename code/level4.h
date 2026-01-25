@@ -8,6 +8,8 @@
 #include "playercontrols.h"
 #include "outfitsystem.h"
 #include "projectilesystem.h"
+#include "collisionsystem.h"
+#include "enemysystem.h"
 
 typedef struct {
     T3DViewport viewport;
@@ -24,6 +26,10 @@ typedef struct {
     AnimationSystem sun_anim_system;
     T3DMat4FP* sunMat;
     
+    // Enemy model
+    T3DModel* enemy_model;
+    T3DMat4FP* enemyMat;
+    
     // Player controls
     PlayerControls player_controls;
     
@@ -32,6 +38,18 @@ typedef struct {
     
     // Projectile system
     ProjectileSystem projectile_system;
+    
+    // Collision system
+    CollisionSystem collision_system;
+    
+    // Enemy system
+    EnemySystem enemy_system;
+    
+    // Hit display
+    bool show_enemy_hit;
+    bool show_player_hit;
+    float enemy_hit_timer;
+    float player_hit_timer;
     
     uint8_t colorAmbient[4];
     uint8_t colorDir[4];

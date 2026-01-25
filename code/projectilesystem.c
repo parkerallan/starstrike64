@@ -2,15 +2,20 @@
 #include <string.h>
 #include <math.h>
 
-void projectile_system_init(ProjectileSystem* ps, float speed, float lifetime, float cooldown) {
+// Collision system tracking - stores the last damage dealt
+static int g_last_damage_dealt = 0;
+
+void projectile_system_init(ProjectileSystem* ps, float speed, float lifetime, float normal_cooldown, float slash_cooldown) {
     if (!ps) return;
     
     memset(ps, 0, sizeof(ProjectileSystem));
     
     ps->projectile_speed = speed;
     ps->projectile_lifetime = lifetime;
-    ps->shoot_cooldown = cooldown;
-    ps->cooldown_timer = 0.0f;
+    ps->shoot_cooldowns[PROJECTILE_NORMAL] = normal_cooldown;
+    ps->shoot_cooldowns[PROJECTILE_SLASH] = slash_cooldown;
+    ps->cooldown_timers[PROJECTILE_NORMAL] = 0.0f;
+    ps->cooldown_timers[PROJECTILE_SLASH] = 0.0f;
     
     // Load projectile models
     ps->projectile_models[PROJECTILE_NORMAL] = t3d_model_load("rom:/playerproj.t3dm");
@@ -30,8 +35,13 @@ void projectile_system_init(ProjectileSystem* ps, float speed, float lifetime, f
     // Allocate matrices for each projectile
     for (int i = 0; i < MAX_PROJECTILES; i++) {
         ps->projectile_matrices[i] = malloc_uncached(sizeof(T3DMat4FP));
-        t3d_mat4fp_identity(ps->projectile_matrices[i]);
+        // Initialize all projectiles off-screen
+        float offscreen[3] = {10000.0f, 10000.0f, 10000.0f};
+        float scale[3] = {0.0f, 0.0f, 0.0f};
+        float rotation[3] = {0.0f, 0.0f, 0.0f};
+        t3d_mat4fp_from_srt_euler(ps->projectile_matrices[i], scale, rotation, offscreen);
         ps->projectiles[i].active = false;
+        ps->projectiles[i].position = (T3DVec3){{10000.0f, 10000.0f, 10000.0f}};
     }
     
     ps->initialized = true;
@@ -63,8 +73,8 @@ void projectile_system_spawn(ProjectileSystem* ps, T3DVec3 position, T3DVec3 dir
     if (!ps || !ps->initialized) return;
     if (type >= PROJECTILE_TYPE_COUNT) return;
     
-    // Check cooldown
-    if (ps->cooldown_timer > 0.0f) return;
+    // Check cooldown for this projectile type
+    if (ps->cooldown_timers[type] > 0.0f) return;
     
     // Find an inactive projectile slot
     for (int i = 0; i < MAX_PROJECTILES; i++) {
@@ -90,8 +100,15 @@ void projectile_system_spawn(ProjectileSystem* ps, T3DVec3 position, T3DVec3 dir
             ps->projectiles[i].lifetime = ps->projectile_lifetime;
             ps->projectiles[i].active = true;
             
-            // Reset cooldown
-            ps->cooldown_timer = ps->shoot_cooldown;
+            // Set damage based on type
+            if (type == PROJECTILE_SLASH) {
+                ps->projectiles[i].damage = 3;  // Slash does 3 damage
+            } else {
+                ps->projectiles[i].damage = 1;  // Normal does 1 damage
+            }
+            
+            // Reset cooldown for this projectile type
+            ps->cooldown_timers[type] = ps->shoot_cooldowns[type];
             
             debugf("Spawned projectile at (%.1f, %.1f, %.1f)\n", 
                    position.v[0], position.v[1], position.v[2]);
@@ -105,11 +122,13 @@ void projectile_system_spawn(ProjectileSystem* ps, T3DVec3 position, T3DVec3 dir
 void projectile_system_update(ProjectileSystem* ps, float delta_time) {
     if (!ps || !ps->initialized) return;
     
-    // Update cooldown timer
-    if (ps->cooldown_timer > 0.0f) {
-        ps->cooldown_timer -= delta_time;
-        if (ps->cooldown_timer < 0.0f) {
-            ps->cooldown_timer = 0.0f;
+    // Update cooldown timers for all projectile types
+    for (int i = 0; i < PROJECTILE_TYPE_COUNT; i++) {
+        if (ps->cooldown_timers[i] > 0.0f) {
+            ps->cooldown_timers[i] -= delta_time;
+            if (ps->cooldown_timers[i] < 0.0f) {
+                ps->cooldown_timers[i] = 0.0f;
+            }
         }
     }
     
@@ -145,6 +164,90 @@ void projectile_system_update(ProjectileSystem* ps, float delta_time) {
     }
 }
 
+void projectile_system_update_with_collision(ProjectileSystem* ps, float delta_time, CollisionSystem* collision, bool* enemy_hit, bool* player_hit, float* enemy_timer, float* player_timer) {
+    if (!ps || !ps->initialized) return;
+    
+    // Update cooldown timers for all projectile types
+    for (int i = 0; i < PROJECTILE_TYPE_COUNT; i++) {
+        if (ps->cooldown_timers[i] > 0.0f) {
+            ps->cooldown_timers[i] -= delta_time;
+            if (ps->cooldown_timers[i] < 0.0f) {
+                ps->cooldown_timers[i] = 0.0f;
+            }
+        }
+    }
+    
+    // Update all active projectiles
+    for (int i = 0; i < MAX_PROJECTILES; i++) {
+        if (ps->projectiles[i].active) {
+            // Update position
+            ps->projectiles[i].position.v[0] += ps->projectiles[i].velocity.v[0] * delta_time;
+            ps->projectiles[i].position.v[1] += ps->projectiles[i].velocity.v[1] * delta_time;
+            ps->projectiles[i].position.v[2] += ps->projectiles[i].velocity.v[2] * delta_time;
+            
+            // Check collision with enemy and player boxes if collision system provided
+            if (collision && collision->initialized) {
+                char hit_name[64];
+                
+                // Check collision with enemies
+                if (collision_system_check_point(collision, &ps->projectiles[i].position, COLLISION_ENEMY, hit_name)) {
+                    if (enemy_hit && enemy_timer) {
+                        *enemy_hit = true;
+                        *enemy_timer = 0.5f;  // Show for 0.5 seconds
+                        g_last_damage_dealt = ps->projectiles[i].damage;  // Store damage for enemy system
+                    }
+                    ps->projectiles[i].active = false;
+                    // Move projectile far off-screen when deactivated
+                    float offscreen[3] = {10000.0f, 10000.0f, 10000.0f};
+                    float scale[3] = {0.0f, 0.0f, 0.0f};
+                    float rotation[3] = {0.0f, 0.0f, 0.0f};
+                    t3d_mat4fp_from_srt_euler(ps->projectile_matrices[i], scale, rotation, offscreen);
+                    continue;
+                }
+                
+                // Check collision with player
+                if (collision_system_check_point(collision, &ps->projectiles[i].position, COLLISION_PLAYER, hit_name)) {
+                    if (player_hit && player_timer) {
+                        *player_hit = true;
+                        *player_timer = 2.0f;  // Show for 2 seconds
+                    }
+                    ps->projectiles[i].active = false;
+                    // Move projectile far off-screen when deactivated
+                    float offscreen[3] = {10000.0f, 10000.0f, 10000.0f};
+                    float scale[3] = {0.0f, 0.0f, 0.0f};
+                    float rotation[3] = {0.0f, 0.0f, 0.0f};
+                    t3d_mat4fp_from_srt_euler(ps->projectile_matrices[i], scale, rotation, offscreen);
+                    continue;
+                }
+            }
+            
+            // Update lifetime
+            ps->projectiles[i].lifetime -= delta_time;
+            
+            // Deactivate if lifetime expired
+            if (ps->projectiles[i].lifetime <= 0.0f) {
+                ps->projectiles[i].active = false;
+                // Move projectile far off-screen when deactivated
+                float offscreen[3] = {10000.0f, 10000.0f, 10000.0f};
+                float scale[3] = {0.0f, 0.0f, 0.0f};
+                float rotation[3] = {0.0f, 0.0f, 0.0f};
+                t3d_mat4fp_from_srt_euler(ps->projectile_matrices[i], scale, rotation, offscreen);
+                continue;
+            }
+            
+            // Update matrix for rendering (only for active projectiles that didn't hit)
+            float scale[3] = {1.0f, 1.0f, 1.0f};
+            float rotation[3] = {0.0f, 0.0f, 0.0f};
+            float position[3] = {
+                ps->projectiles[i].position.v[0],
+                ps->projectiles[i].position.v[1],
+                ps->projectiles[i].position.v[2]
+            };
+            t3d_mat4fp_from_srt_euler(ps->projectile_matrices[i], scale, rotation, position);
+        }
+    }
+}
+
 void projectile_system_render(ProjectileSystem* ps) {
     if (!ps || !ps->initialized) return;
     
@@ -170,7 +273,13 @@ void projectile_system_render(ProjectileSystem* ps) {
     }
 }
 
-bool projectile_system_can_shoot(const ProjectileSystem* ps) {
+bool projectile_system_can_shoot(const ProjectileSystem* ps, ProjectileType type) {
     if (!ps || !ps->initialized) return false;
-    return ps->cooldown_timer <= 0.0f;
+    if (type >= PROJECTILE_TYPE_COUNT) return false;
+    return ps->cooldown_timers[type] <= 0.0f;
+}
+int projectile_system_get_last_damage(void) {
+    int damage = g_last_damage_dealt;
+    g_last_damage_dealt = 0;  // Reset after reading
+    return damage;
 }

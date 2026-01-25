@@ -1,0 +1,47 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+      {
+        "label": "Build ROM",
+        "type": "shell",
+        "command": "cd /d/n64azumanga && make",
+        "options": {
+          "shell": {
+            "executable": "C:\\msys64\\usr\\bin\\bash.exe",
+            "args": ["-l", "-c"]
+          }
+        },
+        "group": {
+            "kind": "build",
+            "isDefault": true
+        },
+        "problemMatcher": ["$gcc"]
+      },
+      {
+        "label": "Clean Build",
+        "type": "shell",
+        "command": "cd /d/n64azumanga && make clean",
+        "options": {
+          "shell": {
+            "executable": "C:\\msys64\\usr\\bin\\bash.exe",
+            "args": ["-l", "-c"]
+          }
+        },
+        "group": {
+            "kind": "build",
+            "isDefault": true
+        },
+        "problemMatcher": ["$gcc"]
+      },
+      {
+        "label": "Run ROM",
+        "type": "shell",
+        "command": "D:/ares/ares.exe D:/n64azumanga/AZUMANGA.z64",
+        "group": {
+            "kind": "test",
+            "isDefault": true
+        },
+        "problemMatcher": []
+      }
+  ]
+}

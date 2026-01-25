@@ -1,0 +1,23 @@
+{
+    "configurations": [
+        {
+            "name": "Win32",
+            "includePath": [
+                "${default}",
+                "D:/libdragon/**",
+                "D:/tiny3d/**",
+                "${workspaceFolder}/code",
+                "D:/libdragon-toolchain/mips64-elf/include",
+                "D:/libdragon-toolchain/lib/gcc/mips64-elf/**/include",
+                "D:/libdragon-toolchain/lib/gcc/mips64-elf/**/include-fixed"
+
+            ],
+            "defines": [],
+            "compilerPath": "D:/libdragon-toolchain/bin/mips64-elf-gcc.exe",
+            "cStandard": "c17",
+            "cppStandard": "c++17",
+            "intelliSenseMode": "gcc-x64"
+        }
+    ],
+    "version": 4
+}

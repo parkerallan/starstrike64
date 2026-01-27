@@ -50,6 +50,11 @@ void outfit_system_cycle_next(OutfitSystem* outfit_system) {
 void outfit_system_update(OutfitSystem* outfit_system, float delta_time) {
     if (!outfit_system || !outfit_system->initialized) return;
     
+    // Validate delta_time
+    if (delta_time <= 0.0f || delta_time != delta_time || delta_time > 1.0f) {
+        return;
+    }
+    
     // Update thrust timer
     if (outfit_system->thrust_timer > 0.0f) {
         outfit_system->thrust_timer -= delta_time;

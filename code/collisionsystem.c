@@ -11,6 +11,7 @@
 #include "collisionsystem.h"
 #include <stdlib.h>
 #include <string.h>
+#include <t3d/t3dmath.h>
 
 int collision_system_parse_health_from_name(const char* name) {
     if (!name) return 1;
@@ -94,6 +95,15 @@ void collision_system_add_box(
     box->max[1] = maxZ;
     box->minY = minY;
     box->maxY = maxY;
+    
+    // Store original model-space bounds
+    box->orig_min[0] = minX;
+    box->orig_min[1] = minZ;
+    box->orig_max[0] = maxX;
+    box->orig_max[1] = maxZ;
+    box->orig_minY = minY;
+    box->orig_maxY = maxY;
+    
     box->type = type;
     box->active = true;
     
@@ -264,6 +274,110 @@ void collision_system_update_box_position(
             system->boxes[i].max[1] = position->v[2] + depth * 0.5f;
             return;
         }
+    }
+}
+
+/**
+ * Update all collision boxes of a specific type based on a transform matrix
+ * This extracts position from the transform and applies it to the original model-space bounds
+ */
+void collision_system_update_boxes_by_type(
+    CollisionSystem* system,
+    CollisionType type,
+    const T3DMat4FP* transform
+) {
+    if (!system || !system->initialized || !transform) return;
+    
+    // Extract position from fixed-point matrix (position is stored in row 3: m[3])
+    // T3DMat4FP has m[4] where each is T3DVec4FP with .i (integer) and .f (fractional) parts
+    // Convert from 16.16 fixed point to float
+    float pos_x = s1616_to_float(transform->m[3].i[0], transform->m[3].f[0]);
+    float pos_y = s1616_to_float(transform->m[3].i[1], transform->m[3].f[1]);
+    float pos_z = s1616_to_float(transform->m[3].i[2], transform->m[3].f[2]);
+    
+    // Safety check for invalid values
+    if (isnan(pos_x) || isnan(pos_y) || isnan(pos_z) || 
+        isinf(pos_x) || isinf(pos_y) || isinf(pos_z)) {
+        return;
+    }
+    
+    for (int i = 0; i < system->count; i++) {
+        if (system->boxes[i].type != type) continue;
+        
+        // Use original model-space bounds to calculate center
+        float centerX = (system->boxes[i].orig_min[0] + system->boxes[i].orig_max[0]) * 0.5f;
+        float centerY = (system->boxes[i].orig_minY + system->boxes[i].orig_maxY) * 0.5f;
+        float centerZ = (system->boxes[i].orig_min[1] + system->boxes[i].orig_max[1]) * 0.5f;
+        
+        // Get extents from original bounds
+        float width = system->boxes[i].orig_max[0] - system->boxes[i].orig_min[0];
+        float height = system->boxes[i].orig_maxY - system->boxes[i].orig_minY;
+        float depth = system->boxes[i].orig_max[1] - system->boxes[i].orig_min[1];
+        
+        // Transform the center point by adding world position
+        float worldX = centerX + pos_x;
+        float worldY = centerY + pos_y;
+        float worldZ = centerZ + pos_z;
+        
+        // Update box position in world space
+        system->boxes[i].min[0] = worldX - width * 0.5f;
+        system->boxes[i].max[0] = worldX + width * 0.5f;
+        system->boxes[i].minY = worldY - height * 0.5f;
+        system->boxes[i].maxY = worldY + height * 0.5f;
+        system->boxes[i].min[1] = worldZ - depth * 0.5f;
+        system->boxes[i].max[1] = worldZ + depth * 0.5f;
+    }
+}
+
+/**
+ * Update collision boxes by index range (for individual enemies)
+ */
+void collision_system_update_boxes_by_range(
+    CollisionSystem* system,
+    int start_index,
+    int count,
+    const T3DMat4FP* transform
+) {
+    if (!system || !system->initialized || !transform) return;
+    if (start_index < 0 || start_index >= system->count) return;
+    
+    // Extract position from fixed-point matrix
+    float pos_x = s1616_to_float(transform->m[3].i[0], transform->m[3].f[0]);
+    float pos_y = s1616_to_float(transform->m[3].i[1], transform->m[3].f[1]);
+    float pos_z = s1616_to_float(transform->m[3].i[2], transform->m[3].f[2]);
+    
+    // Safety check for invalid values
+    if (isnan(pos_x) || isnan(pos_y) || isnan(pos_z) || 
+        isinf(pos_x) || isinf(pos_y) || isinf(pos_z)) {
+        return;
+    }
+    
+    int end_index = start_index + count;
+    if (end_index > system->count) end_index = system->count;
+    
+    for (int i = start_index; i < end_index; i++) {
+        // Use original model-space bounds to calculate center
+        float centerX = (system->boxes[i].orig_min[0] + system->boxes[i].orig_max[0]) * 0.5f;
+        float centerY = (system->boxes[i].orig_minY + system->boxes[i].orig_maxY) * 0.5f;
+        float centerZ = (system->boxes[i].orig_min[1] + system->boxes[i].orig_max[1]) * 0.5f;
+        
+        // Get extents from original bounds
+        float width = system->boxes[i].orig_max[0] - system->boxes[i].orig_min[0];
+        float height = system->boxes[i].orig_maxY - system->boxes[i].orig_minY;
+        float depth = system->boxes[i].orig_max[1] - system->boxes[i].orig_min[1];
+        
+        // Transform the center point by adding world position
+        float worldX = centerX + pos_x;
+        float worldY = centerY + pos_y;
+        float worldZ = centerZ + pos_z;
+        
+        // Update box position in world space
+        system->boxes[i].min[0] = worldX - width * 0.5f;
+        system->boxes[i].max[0] = worldX + width * 0.5f;
+        system->boxes[i].minY = worldY - height * 0.5f;
+        system->boxes[i].maxY = worldY + height * 0.5f;
+        system->boxes[i].min[1] = worldZ - depth * 0.5f;
+        system->boxes[i].max[1] = worldZ + depth * 0.5f;
     }
 }
 

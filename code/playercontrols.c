@@ -14,6 +14,11 @@ void playercontrols_init(PlayerControls* pc, T3DVec3 start_pos, PlayerBoundary b
 }
 
 void playercontrols_update(PlayerControls* pc, joypad_inputs_t inputs, float delta_time) {
+    // Safety check for delta_time
+    if (delta_time <= 0.0f || delta_time > 1.0f || isnan(delta_time)) {
+        delta_time = 1.0f / 60.0f;
+    }
+    
     // Read analog stick input
     float stick_x = inputs.stick_x;
     float stick_y = inputs.stick_y;

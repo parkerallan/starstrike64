@@ -18,7 +18,8 @@ SRC = $(SRC_DIR)/main.c \
       $(SRC_DIR)/outfitsystem.c \
       $(SRC_DIR)/projectilesystem.c \
       $(SRC_DIR)/collisionsystem.c \
-      $(SRC_DIR)/enemysystem.c
+      $(SRC_DIR)/enemysystem.c \
+      $(SRC_DIR)/enemyorchestrator.c
 
 # Toolchain paths
 include $(N64_INST)/include/n64.mk

@@ -17,10 +17,14 @@ typedef enum {
 
 // Axis-aligned bounding box for collision
 typedef struct {
-    float min[2];  // minX, minZ
-    float max[2];  // maxX, maxZ
-    float minY;    // Y min
-    float maxY;    // Y max
+    float min[2];  // minX, minZ (current world position)
+    float max[2];  // maxX, maxZ (current world position)
+    float minY;    // Y min (current world position)
+    float maxY;    // Y max (current world position)
+    float orig_min[2];  // Original model-space minX, minZ
+    float orig_max[2];  // Original model-space maxX, maxZ
+    float orig_minY;    // Original model-space Y min
+    float orig_maxY;    // Original model-space Y max
     char name[64];
     CollisionType type;
     bool active;
@@ -82,6 +86,21 @@ void collision_system_update_box_position(
     CollisionSystem* system,
     const char* name,
     const T3DVec3* position
+);
+
+// Update all collision boxes of a specific type based on a transform matrix
+void collision_system_update_boxes_by_type(
+    CollisionSystem* system,
+    CollisionType type,
+    const T3DMat4FP* transform
+);
+
+// Update collision boxes by index range (for individual enemies)
+void collision_system_update_boxes_by_range(
+    CollisionSystem* system,
+    int start_index,
+    int count,
+    const T3DMat4FP* transform
 );
 
 // Remove a collision box by name

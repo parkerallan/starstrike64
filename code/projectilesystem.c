@@ -278,6 +278,23 @@ bool projectile_system_can_shoot(const ProjectileSystem* ps, ProjectileType type
     if (type >= PROJECTILE_TYPE_COUNT) return false;
     return ps->cooldown_timers[type] <= 0.0f;
 }
+
+Projectile* projectile_system_get_projectile(ProjectileSystem* ps, int index) {
+    if (!ps || !ps->initialized || index < 0 || index >= MAX_PROJECTILES) return NULL;
+    return &ps->projectiles[index];
+}
+
+void projectile_system_deactivate(ProjectileSystem* ps, int index) {
+    if (!ps || !ps->initialized || index < 0 || index >= MAX_PROJECTILES) return;
+    
+    ps->projectiles[index].active = false;
+    // Move projectile far off-screen
+    float offscreen[3] = {10000.0f, 10000.0f, 10000.0f};
+    float scale[3] = {0.0f, 0.0f, 0.0f};
+    float rotation[3] = {0.0f, 0.0f, 0.0f};
+    t3d_mat4fp_from_srt_euler(ps->projectile_matrices[index], scale, rotation, offscreen);
+}
+
 int projectile_system_get_last_damage(void) {
     int damage = g_last_damage_dealt;
     g_last_damage_dealt = 0;  // Reset after reading

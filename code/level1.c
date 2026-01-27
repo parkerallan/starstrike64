@@ -72,14 +72,6 @@ void level1_init(Level1* level, rdpq_font_t* font) {
     } else {
         debugf("Successfully loaded enemy1 model\n");
     }
-    
-    // Allocate enemy matrix
-    level->enemyMat = malloc_uncached(sizeof(T3DMat4FP));
-    // Position enemy in front of player
-    float enemy_scale[3] = {1.0f, 1.0f, 1.0f};
-    float enemy_rotation[3] = {0.0f, 0.0f, 0.0f};
-    float enemy_position[3] = {0.0f, -150.0f, -200.0f};
-    t3d_mat4fp_from_srt_euler(level->enemyMat, enemy_scale, enemy_rotation, enemy_position);
 
     // Initialize player controls with boundaries
     T3DVec3 start_pos = {{0.0f, -150.0f, 0.0f}};
@@ -102,17 +94,13 @@ void level1_init(Level1* level, rdpq_font_t* font) {
     // Initialize collision system
     collision_system_init(&level->collision_system);
     
-    // Extract collision boxes from models
+    // Extract collision boxes for player model only
     collision_system_extract_from_model(&level->collision_system, level->mecha_model, "PLAYER_", COLLISION_PLAYER);
-    // Extract enemy collision with world position offset
-    collision_system_extract_from_model_with_offset(&level->collision_system, level->enemy_model, "ENEMY_", COLLISION_ENEMY, 0.0f, -150.0f, -200.0f);
     
-    // Initialize enemy system with health from collision box name
-    int enemy_health = collision_system_get_enemy_health(&level->collision_system);
-    enemy_system_init(&level->enemy_system, enemy_health);
+    // Initialize enemy orchestrator (will handle enemy spawning and collision)
+    enemy_orchestrator_init(&level->enemy_orchestrator, level->enemy_model, &level->collision_system);
     
     debugf("Collision system initialized with %d boxes\n", level->collision_system.count);
-    debugf("Enemy health: %d\n", enemy_health);
     
     // Initialize hit display
     level->show_enemy_hit = false;
@@ -143,6 +131,12 @@ int level1_update(Level1* level) {
     // Calculate delta time
     float current_time = (float)((double)get_ticks_us() / 1000000.0);
     float delta_time;
+    
+    // Validate current_time
+    if (current_time != current_time || current_time < 0.0f) {
+        current_time = level->last_update_time + (1.0f / 60.0f);
+    }
+    
     if (level->last_update_time == 0.0f) {
         delta_time = 1.0f / 60.0f;
     } else {
@@ -150,8 +144,14 @@ int level1_update(Level1* level) {
     }
     level->last_update_time = current_time;
     
-    if (delta_time < 0.0f || delta_time > 0.5f) {
+    // Validate delta_time (check for NaN, negative, or too large)
+    if (delta_time != delta_time || delta_time < 0.0f || delta_time > 0.5f) {
         delta_time = 1.0f / 60.0f;
+    }
+    
+    // Ensure delta_time is never zero to prevent division by zero
+    if (delta_time < 0.0001f) {
+        delta_time = 0.0001f;
     }
 
     // Update animation system
@@ -165,6 +165,7 @@ int level1_update(Level1* level) {
     }
 
     // Handle input
+    joypad_buttons_t btn = joypad_get_buttons_pressed(JOYPAD_PORT_1);
     joypad_buttons_t btn_held = joypad_get_buttons_held(JOYPAD_PORT_1);
     joypad_inputs_t inputs = joypad_get_inputs(JOYPAD_PORT_1);
     
@@ -174,10 +175,8 @@ int level1_update(Level1* level) {
     // Update outfit system
     outfit_system_update(&level->outfit_system, delta_time);
     
-    // Update enemy system (handles hit detection and health)
-    int damage = projectile_system_get_last_damage();
-    if (damage == 0) damage = 1;  // Default to 1 if no damage stored
-    enemy_system_update(&level->enemy_system, delta_time, &level->show_enemy_hit, &level->enemy_hit_timer, &level->collision_system, damage);
+    // Update enemy orchestrator (handles spawning, movement, and individual enemy systems)
+    enemy_orchestrator_update_level1(&level->enemy_orchestrator, delta_time);
     
     // Update player hit timer
     if (level->player_hit_timer > 0.0f) {
@@ -187,10 +186,23 @@ int level1_update(Level1* level) {
         }
     }
     
-    // Update projectile system with collision detection
-    projectile_system_update_with_collision(&level->projectile_system, delta_time, &level->collision_system, 
-                                            &level->show_enemy_hit, &level->show_player_hit,
-                                            &level->enemy_hit_timer, &level->player_hit_timer);
+    // Update collision boxes to match current player position
+    collision_system_update_boxes_by_type(&level->collision_system, COLLISION_PLAYER, level->modelMat);
+    
+    // Update projectiles (movement only, no collision yet)
+    projectile_system_update(&level->projectile_system, delta_time);
+    
+    // Manual collision checking for enemy hits using orchestrator
+    for (int i = 0; i < MAX_PROJECTILES; i++) {
+        Projectile* proj = projectile_system_get_projectile(&level->projectile_system, i);
+        if (!proj || !proj->active) continue;
+        
+        int hit_enemy_index = -1;
+        if (enemy_orchestrator_check_hit(&level->enemy_orchestrator, &proj->position, &hit_enemy_index, proj->damage)) {
+            // Projectile hit an enemy - deactivate it
+            projectile_system_deactivate(&level->projectile_system, i);
+        }
+    }
 
     // A button - shoot slash projectile (hold for continuous fire)
     if (btn_held.a && projectile_system_can_shoot(&level->projectile_system, PROJECTILE_SLASH)) {
@@ -212,10 +224,10 @@ int level1_update(Level1* level) {
     }
 
     // Start button - go to next level
-    // if (btn.start) {
-    //     debugf("Going to Level 2\n");
-    //     return LEVEL_2;
-    // }
+    if (btn.start) {
+        debugf("Going to Level 2\n");
+        return LEVEL_2;
+    }
 
     // Set up camera
     const T3DVec3 camPos = {{0, 0.0f, 200.0f}};
@@ -268,33 +280,42 @@ void level1_render(Level1* level) {
         t3d_matrix_pop(1);
     }
     
-    // Draw enemy model if loaded and active
-    if (level->enemy_model && enemy_system_is_active(&level->enemy_system)) {
-        // Apply red lighting if flashing
-        if (enemy_system_is_flashing(&level->enemy_system)) {
-            uint8_t flashColor[4] = {255, 80, 80, 0xFF};
-            t3d_light_set_ambient(flashColor);
-            t3d_light_set_directional(0, flashColor, &level->lightDirVec);
-        }
-        
-        t3d_matrix_push(level->enemyMat);
-        
-        T3DModelDrawConf enemyDrawConf = {
-            .userData = NULL,
-            .tileCb = NULL,
-            .filterCb = NULL,
-            .dynTextureCb = NULL,
-            .matrices = NULL
-        };
-        
-        t3d_model_draw_custom(level->enemy_model, enemyDrawConf);
-        
-        t3d_matrix_pop(1);
-        
-        // Restore normal lighting
-        if (enemy_system_is_flashing(&level->enemy_system)) {
-            t3d_light_set_ambient(level->colorAmbient);
-            t3d_light_set_directional(0, level->colorDir, &level->lightDirVec);
+    // Draw active enemies from orchestrator
+    if (level->enemy_model) {
+        for (int i = 0; i < MAX_ENEMIES; i++) {
+            if (enemy_orchestrator_is_active(&level->enemy_orchestrator, i)) {
+                EnemySystem* enemy_sys = enemy_orchestrator_get_system(&level->enemy_orchestrator, i);
+                T3DMat4FP* enemy_mat = enemy_orchestrator_get_matrix(&level->enemy_orchestrator, i);
+                
+                if (!enemy_sys || !enemy_mat) continue;
+                
+                // Apply red lighting if flashing
+                if (enemy_system_is_flashing(enemy_sys)) {
+                    uint8_t flashColor[4] = {255, 80, 80, 0xFF};
+                    t3d_light_set_ambient(flashColor);
+                    t3d_light_set_directional(0, flashColor, &level->lightDirVec);
+                }
+                
+                t3d_matrix_push(enemy_mat);
+                
+                T3DModelDrawConf enemyDrawConf = {
+                    .userData = NULL,
+                    .tileCb = NULL,
+                    .filterCb = NULL,
+                    .dynTextureCb = NULL,
+                    .matrices = NULL
+                };
+                
+                t3d_model_draw_custom(level->enemy_model, enemyDrawConf);
+                
+                t3d_matrix_pop(1);
+                
+                // Restore normal lighting
+                if (enemy_system_is_flashing(enemy_sys)) {
+                    t3d_light_set_ambient(level->colorAmbient);
+                    t3d_light_set_directional(0, level->colorDir, &level->lightDirVec);
+                }
+            }
         }
     }
 
@@ -359,10 +380,8 @@ void level1_cleanup(Level1* level) {
     if (level->starsMat) {
         free_uncached(level->starsMat);
     }
-    
-    if (level->enemyMat) {
-        free_uncached(level->enemyMat);
-    }
+
+    enemy_orchestrator_cleanup(&level->enemy_orchestrator);
 
     projectile_system_cleanup(&level->projectile_system);
     

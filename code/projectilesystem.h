@@ -58,6 +58,12 @@ void projectile_system_update_with_collision(ProjectileSystem* ps, float delta_t
 // Render all projectiles
 void projectile_system_render(ProjectileSystem* ps);
 
+// Get projectile at index for manual collision checking
+Projectile* projectile_system_get_projectile(ProjectileSystem* ps, int index);
+
+// Deactivate a specific projectile by index
+void projectile_system_deactivate(ProjectileSystem* ps, int index);
+
 // Check if can shoot (cooldown expired)
 bool projectile_system_can_shoot(const ProjectileSystem* ps, ProjectileType type);
 

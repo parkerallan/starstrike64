@@ -9,7 +9,7 @@
 #include "outfitsystem.h"
 #include "projectilesystem.h"
 #include "collisionsystem.h"
-#include "enemysystem.h"
+#include "enemyorchestrator.h"
 
 typedef struct {
     T3DViewport viewport;
@@ -27,9 +27,9 @@ typedef struct {
     AnimationSystem stars_anim_system;
     T3DMat4FP* starsMat;
     
-    // Enemy model
+    // Enemy model and orchestrator
     T3DModel* enemy_model;
-    T3DMat4FP* enemyMat;
+    EnemyOrchestrator enemy_orchestrator;
     
     // Player controls
     PlayerControls player_controls;
@@ -42,9 +42,6 @@ typedef struct {
     
     // Collision system
     CollisionSystem collision_system;
-    
-    // Enemy system
-    EnemySystem enemy_system;
     
     // Hit display
     bool show_enemy_hit;

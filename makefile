@@ -13,6 +13,7 @@ SRC = $(SRC_DIR)/main.c \
       $(SRC_DIR)/level3.c \
       $(SRC_DIR)/level4.c \
       $(SRC_DIR)/level5.c \
+			$(SRC_DIR)/end.c \
       $(SRC_DIR)/animationsystem.c \
       $(SRC_DIR)/playercontrols.c \
       $(SRC_DIR)/outfitsystem.c \

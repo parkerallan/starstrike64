@@ -106,6 +106,13 @@ void level3_init(Level3* level, rdpq_font_t* font) {
     
     level->lightDirVec = (T3DVec3){{0.3f, -0.8f, 0.5f}};
     t3d_vec3_norm(&level->lightDirVec);
+
+    // Load and start music
+    wav64_open(&level->music, "rom:/BGM022.wav64");
+    wav64_set_loop(&level->music, true);
+    mixer_ch_set_limits(0, 0, 48000, 0);
+    wav64_play(&level->music, 0);
+    mixer_ch_set_vol(0, 0.5f, 0.5f);  // Standard volume
 }
 
 int level3_update(Level3* level) {
@@ -306,5 +313,6 @@ void level3_cleanup(Level3* level) {
     
     collision_system_cleanup(&level->collision_system);
     
+    wav64_close(&level->music);
     rdpq_text_unregister_font(1);
 }

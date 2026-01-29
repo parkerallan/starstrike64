@@ -1,0 +1,114 @@
+STAR STRIKE 64
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+CREDITS
+
+
+
+Programming
+Parker Allan
+
+
+
+Art & Models
+Parker Allan
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Music
+
+"Brilliance Days" by Marron Fields Production
+
+
+"HELIOS EDGE" by mizu
+
+
+"Disturbance" by shimtone
+
+
+"BGM022 - Battle 3 - Breakbeats" by Sound Of Incense
+
+
+"Unsinkable Battleship" by shimtone
+
+
+"Swords" by shimtone
+
+
+"Heartbeat of the Earth" by Marron Fields Production
+
+
+(License Provided By Dova-Syndrome)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Development Tools
+
+Libdragon SDK
+
+
+Tiny3D ucode for Libdragon
+
+
+Fast64 Blender Addon
+
+
+
+Special thanks to the teams behind these tools!
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Thank you for playing!
+
+parkerdev.net
+
+2026
+
+
+
+

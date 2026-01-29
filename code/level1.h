@@ -55,6 +55,8 @@ typedef struct {
     T3DVec3 lightDirVec;
     
     float last_update_time;
+
+    wav64_t music;
 } Level1;
 
 void level1_init(Level1* level, rdpq_font_t* font);

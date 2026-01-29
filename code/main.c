@@ -7,6 +7,7 @@
 #include "level3.h"
 #include "level4.h"
 #include "level5.h"
+#include "end.h"
 
 // Scene instances
 SceneIntro scene_intro;
@@ -15,11 +16,12 @@ Level2 level2;
 Level3 level3;
 Level4 level4;
 Level5 level5;
+SceneEnd scene_end;
 
 // Global builtin font (loaded once, reused by all scenes)
 rdpq_font_t* builtin_font;
 
-// Debug: Set starting scene (0 = INTRO, 1-5 = LEVEL_1 through LEVEL_5)
+// Debug: Set starting scene (0 = INTRO, 1-5 = LEVEL_1 through LEVEL_5, 6 = END)
 #define START_SCENE 1
 
 GameScene current_scene = SCENE_INTRO;
@@ -43,8 +45,11 @@ int main() {
     // Initialize T3D
     t3d_init((T3DInitParams){});
 
-    // Load builtin font once for all scenes
-    builtin_font = rdpq_font_load_builtin(FONT_BUILTIN_DEBUG_VAR);
+    // Load Prototype font once for all scenes
+    builtin_font = rdpq_font_load("rom:/Prototype.font64");
+    rdpq_font_style(builtin_font, 0, &(rdpq_fontstyle_t){
+        .color = RGBA32(0xFF, 0xFF, 0xFF, 0xFF), // White color
+    });
 
     // Initialize starting scene based on debug define
     #if START_SCENE == 0
@@ -65,6 +70,9 @@ int main() {
     #elif START_SCENE == 5
         level5_init(&level5, builtin_font);
         current_scene = LEVEL_5;
+    #elif START_SCENE == 6
+        end_init(&scene_end, builtin_font);
+        current_scene = SCENE_END;
     #else
     #error "Invalid START_SCENE value"
     #endif
@@ -94,6 +102,9 @@ int main() {
             case LEVEL_5:
                 transition_result = level5_update(&level5);
                 break;
+            case SCENE_END:
+                transition_result = end_update(&scene_end);
+                break;
             default:
                 break;
         }
@@ -120,6 +131,9 @@ int main() {
                 case LEVEL_5:
                     level5_cleanup(&level5);
                     break;
+                case SCENE_END:
+                    end_cleanup(&scene_end);
+                    break;
                 default:
                     break;
             }
@@ -143,6 +157,9 @@ int main() {
                     break;
                 case LEVEL_5:
                     level5_init(&level5, builtin_font);
+                    break;
+                case SCENE_END:
+                    end_init(&scene_end, builtin_font);
                     break;
                 default:
                     break;
@@ -174,6 +191,9 @@ int main() {
             case LEVEL_5:
                 level5_render(&level5);
                 break;
+            case SCENE_END:
+                end_render(&scene_end);
+                break;
             default:
                 break;
         }
@@ -198,6 +218,9 @@ int main() {
             break;
         case LEVEL_5:
             level5_cleanup(&level5);
+            break;
+        case SCENE_END:
+            end_cleanup(&scene_end);
             break;
         default:
             break;

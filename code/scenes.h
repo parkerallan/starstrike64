@@ -9,7 +9,8 @@ typedef enum {
     LEVEL_3 = 3,
     LEVEL_4 = 4,
     LEVEL_5 = 5,
-    SCENE_COUNT = 6
+    SCENE_END = 6,
+    SCENE_COUNT = 7
 } GameScene;
 
 // Return -1 from scene_update() to indicate no transition

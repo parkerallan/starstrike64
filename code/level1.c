@@ -125,6 +125,13 @@ void level1_init(Level1* level, rdpq_font_t* font) {
 
     level->lightDirVec = (T3DVec3){{0.3f, -0.8f, 0.5f}};
     t3d_vec3_norm(&level->lightDirVec);
+
+    // Load and start music
+    wav64_open(&level->music, "rom:/HELIOS_EDGE.wav64");
+    wav64_set_loop(&level->music, true);
+    mixer_ch_set_limits(0, 0, 48000, 0);
+    wav64_play(&level->music, 0);
+    mixer_ch_set_vol(0, 0.5f, 0.5f);  // Standard volume
 }
 
 int level1_update(Level1* level) {
@@ -387,5 +394,6 @@ void level1_cleanup(Level1* level) {
     
     collision_system_cleanup(&level->collision_system);
 
+    wav64_close(&level->music);
     rdpq_text_unregister_font(1);
 }

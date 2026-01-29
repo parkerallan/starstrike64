@@ -19,7 +19,7 @@ A 3D rail-shooter mecha game for Nintendo 64 using libdragon and Tiny3D.
   [https://dova-s.jp/bgm/play19081.html](https://dova-s.jp/bgm/play19081.html)  
 
   - Level 3 Song Credit:  
-  "BGM022 - Battle 3 - Breakbeats" by Sound Of Incense 
+  "BGM022 - Battle 3 - Breakbeats" by Sound Of Incense  
   [https://dova-s.jp/bgm/play10661.html](https://dova-s.jp/bgm/play10661.html)  
 
   - Level 4 Song Credit:  

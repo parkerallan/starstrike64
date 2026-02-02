@@ -104,13 +104,17 @@ void level1_init(Level1* level, rdpq_font_t* font) {
     
     // Initialize hit display
     level->show_enemy_hit = false;
-    level->show_player_hit = false;
     level->enemy_hit_timer = 0.0f;
-    level->player_hit_timer = 0.0f;
+    
+    // Initialize player health system
+    player_health_init(&level->player_health, &level->collision_system);
 
     // Use pre-loaded font
     level->font = font;
     rdpq_text_register_font(1, level->font);
+
+    // Initialize title animation
+    title_animation_init(&level->title_anim, "DEEP SPACE");
 
     // Set up lighting
     level->colorAmbient[0] = 180;
@@ -185,13 +189,14 @@ int level1_update(Level1* level) {
     // Update enemy orchestrator (handles spawning, movement, and individual enemy systems)
     enemy_orchestrator_update_level1(&level->enemy_orchestrator, delta_time);
     
-    // Update player hit timer
-    if (level->player_hit_timer > 0.0f) {
-        level->player_hit_timer -= delta_time;
-        if (level->player_hit_timer <= 0.0f) {
-            level->show_player_hit = false;
-        }
-    }
+    // Have enemies shoot projectiles during level 1
+    enemy_orchestrator_spawn_projectiles_level1(&level->enemy_orchestrator, &level->projectile_system, delta_time);
+    
+    // Update title animation
+    title_animation_update(&level->title_anim, delta_time);
+    
+    // Update player health system
+    player_health_update(&level->player_health, delta_time);
     
     // Update collision boxes to match current player position
     collision_system_update_boxes_by_type(&level->collision_system, COLLISION_PLAYER, level->modelMat);
@@ -199,15 +204,25 @@ int level1_update(Level1* level) {
     // Update projectiles (movement only, no collision yet)
     projectile_system_update(&level->projectile_system, delta_time);
     
-    // Manual collision checking for enemy hits using orchestrator
+    // Manual collision checking for projectiles
     for (int i = 0; i < MAX_PROJECTILES; i++) {
         Projectile* proj = projectile_system_get_projectile(&level->projectile_system, i);
         if (!proj || !proj->active) continue;
         
-        int hit_enemy_index = -1;
-        if (enemy_orchestrator_check_hit(&level->enemy_orchestrator, &proj->position, &hit_enemy_index, proj->damage)) {
-            // Projectile hit an enemy - deactivate it
-            projectile_system_deactivate(&level->projectile_system, i);
+        if (proj->is_enemy) {
+            // Enemy projectile - check collision with player
+            char hit_name[64];
+            if (!player_health_is_dead(&level->player_health) && 
+                collision_system_check_point(&level->collision_system, &proj->position, COLLISION_PLAYER, hit_name)) {
+                player_health_take_damage(&level->player_health, 1);
+                projectile_system_deactivate(&level->projectile_system, i);
+            }
+        } else {
+            // Player projectile - check collision with enemies
+            int hit_enemy_index = -1;
+            if (enemy_orchestrator_check_hit(&level->enemy_orchestrator, &proj->position, &hit_enemy_index, proj->damage)) {
+                projectile_system_deactivate(&level->projectile_system, i);
+            }
         }
     }
 
@@ -346,8 +361,11 @@ void level1_render(Level1* level) {
     projectile_system_render(&level->projectile_system);
 
     // Draw UI
-    rdpq_sync_pipe();
-    rdpq_text_printf(NULL, 1, 10, 10, "DEEP SPACE");
+    title_animation_render(&level->title_anim, level->font, 1, 70);
+    
+    // Draw player health
+    player_health_render(&level->player_health);
+    
     rdpq_detach_show();
 }
 
@@ -379,6 +397,9 @@ void level1_cleanup(Level1* level) {
     if (level->enemy_model) {
         t3d_model_free(level->enemy_model);
     }
+    
+    // Cleanup player health system
+    player_health_cleanup(&level->player_health);
 
     if (level->modelMat) {
         free_uncached(level->modelMat);

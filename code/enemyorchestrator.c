@@ -6,6 +6,7 @@
 #include "enemyorchestrator.h"
 #include <stdlib.h>
 #include <string.h>
+#define M_PI 3.14159265358979323846
 
 // Forward declaration of common update helper
 static void enemy_orchestrator_update_common(EnemyOrchestrator* orch, float delta_time);
@@ -28,6 +29,7 @@ void enemy_orchestrator_init(EnemyOrchestrator* orch, T3DModel* enemy_model, Col
         orch->enemies[i].collision_count = 0;
         orch->enemies[i].movement_phase = 0;
         orch->enemies[i].phase_timer = 0.0f;
+        orch->enemies[i].shoot_timer = 0.0f;
     }
 }
 
@@ -71,6 +73,7 @@ void enemy_orchestrator_spawn_enemy(
             enemy->active = true;
             enemy->show_hit = false;
             enemy->hit_timer = 0.0f;
+            enemy->shoot_timer = 0.0f;
             orch->active_count++;
             
             debugf("Spawned enemy %d at (%.1f, %.1f, %.1f) with %d collision boxes\n", 
@@ -137,10 +140,10 @@ bool enemy_orchestrator_check_hit(EnemyOrchestrator* orch, const T3DVec3* positi
 }
 
 /**
- * Level 1 enemy pattern - Classic shmup wave attack
- * Groups of 3 enemies fly in from the right side in diagonal formation,
- * pause in front of player in a horizontal line, then fly off to the left.
- * 5 waves total with 3 second intervals.
+ * Level 1 enemy pattern - Realistic curved spaceship attack patterns
+ * Enemies curve in from different directions using smooth bezier-like curves,
+ * decelerate into position, hold formation while attacking, then accelerate away.
+ * 5 waves total with varied approach vectors.
  */
 void enemy_orchestrator_update_level1(EnemyOrchestrator* orch, float delta_time) {
     // Validate delta_time
@@ -150,38 +153,87 @@ void enemy_orchestrator_update_level1(EnemyOrchestrator* orch, float delta_time)
     
     orch->elapsed_time += delta_time;
     
-    // Spawn 5 waves of 3 enemies - wait for previous wave to clear before spawning next
-    // Check if enough time has passed AND no enemies are currently active
+    // Spawn 5 waves of enemies with varied approach patterns
     if (orch->wave_count < 5 && 
         orch->elapsed_time - orch->last_spawn_time > 5.0f &&
         orch->active_count == 0) {
         
-        // Spawn 3 enemies in diagonal formation from right side
-        // They fly in horizontally (left direction only), arranged diagonally
+        int wave = orch->wave_count;
         
-        // Top-right enemy (furthest back in Z)
-        enemy_orchestrator_spawn_enemy(orch, 250.0f, -80.0f, -450.0f, -100.0f, 0.0f, 0.0f);
-        orch->enemies[orch->active_count - 1].target_position = (T3DVec3){{-80.0f, -80.0f, -450.0f}};
-        orch->enemies[orch->active_count - 1].movement_phase = 0;
-        orch->enemies[orch->active_count - 1].phase_timer = 0.0f;
-        
-        // Middle enemy
-        enemy_orchestrator_spawn_enemy(orch, 280.0f, -100.0f, -350.0f, -100.0f, 0.0f, 0.0f);
-        orch->enemies[orch->active_count - 1].target_position = (T3DVec3){{0.0f, -100.0f, -350.0f}};
-        orch->enemies[orch->active_count - 1].movement_phase = 0;
-        orch->enemies[orch->active_count - 1].phase_timer = 0.0f;
-        
-        // Bottom-right enemy (closest in Z)
-        enemy_orchestrator_spawn_enemy(orch, 310.0f, -120.0f, -250.0f, -100.0f, 0.0f, 0.0f);
-        orch->enemies[orch->active_count - 1].target_position = (T3DVec3){{80.0f, -120.0f, -250.0f}};
-        orch->enemies[orch->active_count - 1].movement_phase = 0;
-        orch->enemies[orch->active_count - 1].phase_timer = 0.0f;
+        // Wave patterns alternate between different approach vectors
+        switch (wave % 3) {
+            case 0: // Arc from top-right, curving down and forward
+            {
+                // Enemy 1: High right arc
+                enemy_orchestrator_spawn_enemy(orch, 300.0f, 50.0f, -400.0f, -120.0f, -80.0f, 100.0f);
+                orch->enemies[orch->active_count - 1].target_position = (T3DVec3){{-100.0f, -90.0f, -250.0f}};
+                orch->enemies[orch->active_count - 1].movement_phase = 0;
+                orch->enemies[orch->active_count - 1].phase_timer = 0.0f;
+                
+                // Enemy 2: Mid-right arc
+                enemy_orchestrator_spawn_enemy(orch, 350.0f, 20.0f, -450.0f, -130.0f, -70.0f, 110.0f);
+                orch->enemies[orch->active_count - 1].target_position = (T3DVec3){{0.0f, -100.0f, -240.0f}};
+                orch->enemies[orch->active_count - 1].movement_phase = 0;
+                orch->enemies[orch->active_count - 1].phase_timer = 0.0f;
+                
+                // Enemy 3: Lower right arc
+                enemy_orchestrator_spawn_enemy(orch, 400.0f, -10.0f, -480.0f, -140.0f, -60.0f, 120.0f);
+                orch->enemies[orch->active_count - 1].target_position = (T3DVec3){{100.0f, -110.0f, -230.0f}};
+                orch->enemies[orch->active_count - 1].movement_phase = 0;
+                orch->enemies[orch->active_count - 1].phase_timer = 0.0f;
+                break;
+            }
+            
+            case 1: // Arc from top-left, curving down and forward
+            {
+                // Enemy 1: High left arc
+                enemy_orchestrator_spawn_enemy(orch, -300.0f, 60.0f, -420.0f, 110.0f, -85.0f, 105.0f);
+                orch->enemies[orch->active_count - 1].target_position = (T3DVec3){{100.0f, -85.0f, -255.0f}};
+                orch->enemies[orch->active_count - 1].movement_phase = 0;
+                orch->enemies[orch->active_count - 1].phase_timer = 0.0f;
+                
+                // Enemy 2: Mid-left arc  
+                enemy_orchestrator_spawn_enemy(orch, -350.0f, 30.0f, -460.0f, 125.0f, -75.0f, 115.0f);
+                orch->enemies[orch->active_count - 1].target_position = (T3DVec3){{0.0f, -100.0f, -245.0f}};
+                orch->enemies[orch->active_count - 1].movement_phase = 0;
+                orch->enemies[orch->active_count - 1].phase_timer = 0.0f;
+                
+                // Enemy 3: Lower left arc
+                enemy_orchestrator_spawn_enemy(orch, -380.0f, 0.0f, -490.0f, 135.0f, -65.0f, 125.0f);
+                orch->enemies[orch->active_count - 1].target_position = (T3DVec3){{-100.0f, -115.0f, -235.0f}};
+                orch->enemies[orch->active_count - 1].movement_phase = 0;
+                orch->enemies[orch->active_count - 1].phase_timer = 0.0f;
+                break;
+            }
+            
+            case 2: // Pincer from both sides, converging on center
+            {
+                // Left pincer
+                enemy_orchestrator_spawn_enemy(orch, -400.0f, -50.0f, -350.0f, 130.0f, -30.0f, 90.0f);
+                orch->enemies[orch->active_count - 1].target_position = (T3DVec3){{-80.0f, -95.0f, -240.0f}};
+                orch->enemies[orch->active_count - 1].movement_phase = 0;
+                orch->enemies[orch->active_count - 1].phase_timer = 0.0f;
+                
+                // Center approach
+                enemy_orchestrator_spawn_enemy(orch, 0.0f, 80.0f, -500.0f, 0.0f, -90.0f, 130.0f);
+                orch->enemies[orch->active_count - 1].target_position = (T3DVec3){{0.0f, -100.0f, -250.0f}};
+                orch->enemies[orch->active_count - 1].movement_phase = 0;
+                orch->enemies[orch->active_count - 1].phase_timer = 0.0f;
+                
+                // Right pincer
+                enemy_orchestrator_spawn_enemy(orch, 400.0f, -50.0f, -350.0f, -130.0f, -30.0f, 90.0f);
+                orch->enemies[orch->active_count - 1].target_position = (T3DVec3){{80.0f, -95.0f, -240.0f}};
+                orch->enemies[orch->active_count - 1].movement_phase = 0;
+                orch->enemies[orch->active_count - 1].phase_timer = 0.0f;
+                break;
+            }
+        }
         
         orch->last_spawn_time = orch->elapsed_time;
         orch->wave_count++;
     }
     
-    // Update all active enemies with phase-based movement
+    // Update all active enemies with realistic curved movement
     for (int i = 0; i < MAX_ENEMIES; i++) {
         if (!orch->enemies[i].active) continue;
         
@@ -199,44 +251,117 @@ void enemy_orchestrator_update_level1(EnemyOrchestrator* orch, float delta_time)
         }
         
         switch (enemy->movement_phase) {
-            case 0: // Flying in from right side (horizontal movement only)
+            case 0: // Curved approach with deceleration
             {
-                // Move towards target position (only X changes, Z stays constant)
-                enemy->position.v[0] += enemy->velocity.v[0] * delta_time;
-                enemy->position.v[1] += enemy->velocity.v[1] * delta_time;
-                enemy->position.v[2] += enemy->velocity.v[2] * delta_time;
+                // Calculate distance to target
+                float dx = enemy->target_position.v[0] - enemy->position.v[0];
+                float dy = enemy->target_position.v[1] - enemy->position.v[1];
+                float dz = enemy->target_position.v[2] - enemy->position.v[2];
+                float distance = sqrtf(dx*dx + dy*dy + dz*dz);
                 
-                // Check if reached target X position (horizontal arrival)
-                float dist_x = fabsf(enemy->target_position.v[0] - enemy->position.v[0]);
-                
-                if (dist_x < 5.0f) { // Within 5 units of target X
-                    // Snap to target position and transition to pause phase
-                    enemy->position.v[0] = enemy->target_position.v[0];
+                if (distance < 10.0f) {
+                    // Arrived at target - transition to hold phase
+                    enemy->position = enemy->target_position;
                     enemy->velocity = (T3DVec3){{0.0f, 0.0f, 0.0f}};
                     enemy->movement_phase = 1;
                     enemy->phase_timer = 0.0f;
+                } else {
+                    // Smooth deceleration curve using quadratic easing
+                    // Ships slow down as they approach target (realistic physics)
+                    float progress = 1.0f - (distance / 600.0f); // Normalize based on typical approach distance
+                    if (progress < 0.0f) progress = 0.0f;
+                    if (progress > 1.0f) progress = 1.0f;
+                    
+                    // Ease-out quadratic: fast approach, slow arrival
+                    float ease = 1.0f - (1.0f - progress) * (1.0f - progress);
+                    float decel_factor = 0.3f + (1.0f - ease) * 0.7f; // Range: 0.3 to 1.0
+                    
+                    // Apply curved velocity with deceleration
+                    // Normalize direction
+                    float inv_dist = 1.0f / distance;
+                    float dir_x = dx * inv_dist;
+                    float dir_y = dy * inv_dist;
+                    float dir_z = dz * inv_dist;
+                    
+                    // Base speed scales with deceleration
+                    float base_speed = 200.0f * decel_factor;
+                    
+                    // Smooth interpolation toward target direction (banking turn effect)
+                    float turn_rate = 2.0f * delta_time; // How quickly ship can turn
+                    float current_speed = sqrtf(enemy->velocity.v[0]*enemy->velocity.v[0] + 
+                                               enemy->velocity.v[1]*enemy->velocity.v[1] + 
+                                               enemy->velocity.v[2]*enemy->velocity.v[2]);
+                    
+                    if (current_speed > 0.01f) {
+                        float inv_current = 1.0f / current_speed;
+                        float current_dir_x = enemy->velocity.v[0] * inv_current;
+                        float current_dir_y = enemy->velocity.v[1] * inv_current;
+                        float current_dir_z = enemy->velocity.v[2] * inv_current;
+                        
+                        // Smoothly blend current direction toward target direction
+                        float blend_x = current_dir_x + (dir_x - current_dir_x) * turn_rate;
+                        float blend_y = current_dir_y + (dir_y - current_dir_y) * turn_rate;
+                        float blend_z = current_dir_z + (dir_z - current_dir_z) * turn_rate;
+                        
+                        // Renormalize
+                        float blend_len = sqrtf(blend_x*blend_x + blend_y*blend_y + blend_z*blend_z);
+                        if (blend_len > 0.01f) {
+                            float inv_blend = 1.0f / blend_len;
+                            blend_x *= inv_blend;
+                            blend_y *= inv_blend;
+                            blend_z *= inv_blend;
+                        }
+                        
+                        enemy->velocity.v[0] = blend_x * base_speed;
+                        enemy->velocity.v[1] = blend_y * base_speed;
+                        enemy->velocity.v[2] = blend_z * base_speed;
+                    } else {
+                        // Initialize velocity if stationary
+                        enemy->velocity.v[0] = dir_x * base_speed;
+                        enemy->velocity.v[1] = dir_y * base_speed;
+                        enemy->velocity.v[2] = dir_z * base_speed;
+                    }
+                    
+                    // Update position
+                    enemy->position.v[0] += enemy->velocity.v[0] * delta_time;
+                    enemy->position.v[1] += enemy->velocity.v[1] * delta_time;
+                    enemy->position.v[2] += enemy->velocity.v[2] * delta_time;
                 }
                 break;
             }
             
-            case 1: // Paused in formation in front of player
+            case 1: // Hold position and attack
             {
-                // Stay in place for 3 seconds (increased pause time)
-                if (enemy->phase_timer > 3.0f) {
-                    // Transition to fly off phase
-                    enemy->velocity = (T3DVec3){{-120.0f, 0.0f, 0.0f}}; // Fly left faster
+                // Stay in formation for 4 seconds while shooting
+                if (enemy->phase_timer > 4.0f) {
+                    // Choose exit direction based on current position
+                    // Ships exit away from center in varied directions
+                    float exit_x = enemy->position.v[0] > 0.0f ? 200.0f : -200.0f;
+                    float exit_y = -100.0f; // Slightly down
+                    float exit_z = -150.0f; // Move back into distance
+                    
+                    enemy->velocity = (T3DVec3){{exit_x, exit_y, exit_z}};
                     enemy->movement_phase = 2;
                     enemy->phase_timer = 0.0f;
                 }
                 break;
             }
             
-            case 2: // Flying off to the left
+            case 2: // Exit with acceleration
             {
-                enemy->position.v[0] += enemy->velocity.v[0] * delta_time;
+                // Accelerate away from combat zone (realistic thrust increase)
+                float accel_factor = 1.0f + enemy->phase_timer * 0.8f; // Accelerate over time
+                if (accel_factor > 2.5f) accel_factor = 2.5f; // Cap acceleration
                 
-                // Deactivate when off screen
-                if (enemy->position.v[0] < -250.0f) {
+                enemy->position.v[0] += enemy->velocity.v[0] * accel_factor * delta_time;
+                enemy->position.v[1] += enemy->velocity.v[1] * accel_factor * delta_time;
+                enemy->position.v[2] += enemy->velocity.v[2] * accel_factor * delta_time;
+                
+                // Deactivate when far enough away
+                float dist_from_center = sqrtf(enemy->position.v[0]*enemy->position.v[0] + 
+                                               enemy->position.v[1]*enemy->position.v[1]);
+                
+                if (dist_from_center > 600.0f || enemy->position.v[2] < -600.0f) {
                     for (int j = enemy->collision_start_index; j < enemy->collision_start_index + enemy->collision_count; j++) {
                         if (j < orch->collision_system->count) {
                             orch->collision_system->boxes[j].active = false;
@@ -494,6 +619,42 @@ void enemy_orchestrator_cleanup(EnemyOrchestrator* orch) {
         if (orch->enemies[i].matrix) {
             free_uncached(orch->enemies[i].matrix);
             orch->enemies[i].matrix = NULL;
+        }
+    }
+}
+
+/**
+ * Spawn enemy projectiles for level 1 enemies in pause phase
+ * Enemies shoot towards the player at regular intervals
+ */
+void enemy_orchestrator_spawn_projectiles_level1(EnemyOrchestrator* orch, void* projectile_system_ptr, float delta_time) {
+    if (!orch || !projectile_system_ptr) return;
+    
+    // Include projectile system header for spawning
+    #include "projectilesystem.h"
+    ProjectileSystem* ps = (ProjectileSystem*)projectile_system_ptr;
+    
+    for (int i = 0; i < MAX_ENEMIES; i++) {
+        if (!orch->enemies[i].active) continue;
+        
+        EnemyInstance* enemy = &orch->enemies[i];
+        
+        // Shoot during flying in (phase 0) and pause phase (phase 1)
+        if (enemy->movement_phase == 0 || enemy->movement_phase == 1) {
+            enemy->shoot_timer += delta_time;
+            
+            // Shoot every 1 second
+            if (enemy->shoot_timer >= 1.0f) {
+                enemy->shoot_timer = 0.0f;
+                
+                // Spawn projectile at enemy position
+                T3DVec3 spawn_pos = enemy->position;
+                
+                // Shoot towards player (assuming player at 0, -150, 0)
+                T3DVec3 shoot_direction = {{0.0f, 0.0f, 1.0f}};  // Forward towards player
+                
+                projectile_system_spawn(ps, spawn_pos, shoot_direction, PROJECTILE_ENEMY);
+            }
         }
     }
 }

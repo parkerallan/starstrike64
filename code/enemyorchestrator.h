@@ -24,6 +24,7 @@ typedef struct {
     float hit_timer;            // Timer for hit display
     int movement_phase;         // 0=flying in, 1=paused, 2=flying off
     float phase_timer;          // Timer for current phase
+    float shoot_timer;          // Timer for shooting projectiles
 } EnemyInstance;
 
 // Enemy orchestrator for a level
@@ -74,5 +75,8 @@ int enemy_orchestrator_get_active_count(EnemyOrchestrator* orch);
 
 // Cleanup
 void enemy_orchestrator_cleanup(EnemyOrchestrator* orch);
+
+// Spawn enemy projectiles during level 1 (pass projectile system from level)
+void enemy_orchestrator_spawn_projectiles_level1(EnemyOrchestrator* orch, void* projectile_system, float delta_time);
 
 #endif // ENEMYORCHESTRATOR_H

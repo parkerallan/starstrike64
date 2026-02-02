@@ -10,6 +10,8 @@
 #include "projectilesystem.h"
 #include "collisionsystem.h"
 #include "enemyorchestrator.h"
+#include "titleanimation.h"
+#include "playerhealthsystem.h"
 
 typedef struct {
     T3DViewport viewport;
@@ -45,15 +47,17 @@ typedef struct {
     // Enemy orchestrator
     EnemyOrchestrator enemy_orchestrator;
     
-    // Hit display
-    bool show_player_hit;
-    float player_hit_timer;
+    // Player health system
+    PlayerHealthSystem player_health;
     
     uint8_t colorAmbient[4];
     uint8_t colorDir[4];
     T3DVec3 lightDirVec;
     
     float last_update_time;
+
+    // Title animation
+    TitleAnimation title_anim;
 
     wav64_t music;
 } Level3;

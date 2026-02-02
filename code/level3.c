@@ -87,12 +87,14 @@ void level3_init(Level3* level, rdpq_font_t* font) {
     
     debugf("Collision system initialized with %d boxes\n", level->collision_system.count);
     
-    // Initialize hit display
-    level->show_player_hit = false;
-    level->player_hit_timer = 0.0f;
+    // Initialize player health system
+    player_health_init(&level->player_health, &level->collision_system);
     
     level->font = font;
     rdpq_text_register_font(1, level->font);
+    
+    // Initialize title animation
+    title_animation_init(&level->title_anim, "JUPITER");
     
     level->colorAmbient[0] = 180;
     level->colorAmbient[1] = 180;
@@ -141,13 +143,8 @@ int level3_update(Level3* level) {
     // Update enemy orchestrator (handles spawning, movement, and individual enemy systems)
     enemy_orchestrator_update_level3(&level->enemy_orchestrator, delta_time);
     
-    // Update player hit timer
-    if (level->player_hit_timer > 0.0f) {
-        level->player_hit_timer -= delta_time;
-        if (level->player_hit_timer <= 0.0f) {
-            level->show_player_hit = false;
-        }
-    }
+    // Update player health system
+    player_health_update(&level->player_health, delta_time);
     
     // Manual projectile collision checking with each enemy
     for (int p = 0; p < MAX_PROJECTILES; p++) {
@@ -167,6 +164,9 @@ int level3_update(Level3* level) {
     
     // Update projectile system (movement and rendering)
     projectile_system_update(&level->projectile_system, delta_time);
+    
+    // Update title animation
+    title_animation_update(&level->title_anim, delta_time);
     
     // A button - shoot slash projectile (hold for continuous fire)
     if (btn_held.a && projectile_system_can_shoot(&level->projectile_system, PROJECTILE_SLASH)) {
@@ -283,8 +283,12 @@ void level3_render(Level3* level) {
     // Draw projectiles
     projectile_system_render(&level->projectile_system);
     
-    rdpq_sync_pipe();
-    rdpq_text_printf(NULL, 1, 10, 10, "JUPITER");
+    // Draw title animation
+    title_animation_render(&level->title_anim, level->font, 1, 70);
+    
+    // Draw player health
+    player_health_render(&level->player_health);
+    
     rdpq_detach_show();
 }
 

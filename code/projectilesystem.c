@@ -32,6 +32,13 @@ void projectile_system_init(ProjectileSystem* ps, float speed, float lifetime, f
         debugf("Successfully loaded slash model\n");
     }
     
+    ps->projectile_models[PROJECTILE_ENEMY] = t3d_model_load("rom:/enemyproj1.t3dm");
+    if (!ps->projectile_models[PROJECTILE_ENEMY]) {
+        debugf("WARNING: Failed to load enemyproj1 model\n");
+    } else {
+        debugf("Successfully loaded enemyproj1 model\n");
+    }
+    
     // Allocate matrices for each projectile
     for (int i = 0; i < MAX_PROJECTILES; i++) {
         ps->projectile_matrices[i] = malloc_uncached(sizeof(T3DMat4FP));
@@ -100,15 +107,28 @@ void projectile_system_spawn(ProjectileSystem* ps, T3DVec3 position, T3DVec3 dir
             ps->projectiles[i].lifetime = ps->projectile_lifetime;
             ps->projectiles[i].active = true;
             
-            // Set damage based on type
+            // Set damage and owner based on type
             if (type == PROJECTILE_SLASH) {
                 ps->projectiles[i].damage = 3;  // Slash does 3 damage
+                ps->projectiles[i].is_enemy = false;
+            } else if (type == PROJECTILE_ENEMY) {
+                ps->projectiles[i].damage = 1;  // Enemy projectile does 1 damage
+                ps->projectiles[i].is_enemy = true;
             } else {
                 ps->projectiles[i].damage = 1;  // Normal does 1 damage
+                ps->projectiles[i].is_enemy = false;
             }
             
-            // Reset cooldown for this projectile type
-            ps->cooldown_timers[type] = ps->shoot_cooldowns[type];
+            // Reset cooldown for this projectile type (skip for enemy projectiles)
+            if (type != PROJECTILE_ENEMY) {
+                ps->cooldown_timers[type] = ps->shoot_cooldowns[type];
+            }
+            
+            // Initialize matrix immediately for rendering
+            float scale[3] = {1.0f, 1.0f, 1.0f};
+            float rotation[3] = {0.0f, 0.0f, 0.0f};
+            float pos[3] = {position.v[0], position.v[1], position.v[2]};
+            t3d_mat4fp_from_srt_euler(ps->projectile_matrices[i], scale, rotation, pos);
             
             debugf("Spawned projectile at (%.1f, %.1f, %.1f)\n", 
                    position.v[0], position.v[1], position.v[2]);

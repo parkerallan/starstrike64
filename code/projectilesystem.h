@@ -13,6 +13,7 @@
 typedef enum {
     PROJECTILE_NORMAL,
     PROJECTILE_SLASH,
+    PROJECTILE_ENEMY,
     PROJECTILE_TYPE_COUNT
 } ProjectileType;
 
@@ -24,6 +25,7 @@ typedef struct {
     bool active;
     ProjectileType type;
     int damage;  // Damage dealt on hit
+    bool is_enemy;  // true if fired by enemy, false if fired by player
 } Projectile;
 
 // Projectile system

@@ -12,6 +12,9 @@ typedef struct {
     sprite_t* health_sprite;
     float hit_display_timer;
     bool show_hit;
+    float flash_timer;
+    float flash_duration;
+    float death_timer;  // Timer for death state (5 seconds before reload)
 } PlayerHealthSystem;
 
 /**
@@ -42,9 +45,19 @@ void player_health_render(PlayerHealthSystem* system);
 bool player_health_is_dead(PlayerHealthSystem* system);
 
 /**
+ * Check if death timer has expired (5 seconds)
+ */
+bool player_health_should_reload(PlayerHealthSystem* system);
+
+/**
  * Check if hit display is active
  */
 bool player_health_is_showing_hit(PlayerHealthSystem* system);
+
+/**
+ * Check if player is flashing red (just took damage)
+ */
+bool player_health_is_flashing(PlayerHealthSystem* system);
 
 /**
  * Cleanup resources

@@ -19,6 +19,19 @@ void enemy_orchestrator_init(EnemyOrchestrator* orch, T3DModel* enemy_model, Col
     orch->active_count = 0;
     orch->wave_count = 0;
     
+    // Load explosion model
+    orch->explosion_model = t3d_model_load("rom:/explosion.t3dm");
+    if (!orch->explosion_model) {
+        debugf("WARNING: Failed to load enemy explosion model\n");
+    }
+    
+    // Allocate explosion matrices
+    orch->explosion_matrices = malloc_uncached(sizeof(T3DMat4FP*) * MAX_ENEMIES);
+    for (int i = 0; i < MAX_ENEMIES; i++) {
+        orch->explosion_matrices[i] = malloc_uncached(sizeof(T3DMat4FP));
+        t3d_mat4fp_identity(orch->explosion_matrices[i]);
+    }
+    
     // Initialize all enemy instances
     for (int i = 0; i < MAX_ENEMIES; i++) {
         orch->enemies[i].matrix = malloc_uncached(sizeof(T3DMat4FP));
@@ -30,6 +43,8 @@ void enemy_orchestrator_init(EnemyOrchestrator* orch, T3DModel* enemy_model, Col
         orch->enemies[i].movement_phase = 0;
         orch->enemies[i].phase_timer = 0.0f;
         orch->enemies[i].shoot_timer = 0.0f;
+        orch->enemies[i].has_explosion = false;
+        orch->enemies[i].explosion_timer = 0.0f;
     }
 }
 
@@ -74,6 +89,8 @@ void enemy_orchestrator_spawn_enemy(
             enemy->show_hit = false;
             enemy->hit_timer = 0.0f;
             enemy->shoot_timer = 0.0f;
+            enemy->has_explosion = false;
+            enemy->explosion_timer = 0.0f;
             orch->active_count++;
             
             debugf("Spawned enemy %d at (%.1f, %.1f, %.1f) with %d collision boxes\n", 
@@ -122,6 +139,21 @@ bool enemy_orchestrator_check_hit(EnemyOrchestrator* orch, const T3DVec3* positi
                 
                 if (enemy->system.health <= 0) {
                     enemy->system.active = false;
+                    enemy->has_explosion = true;
+                    enemy->explosion_timer = 0.1f;
+                    enemy->explosion_position = enemy->position;
+                    
+                    debugf("*** EXPLOSION %d CREATED at (%.1f, %.1f, %.1f) timer=1.0\n", 
+                           i, enemy->explosion_position.v[0], enemy->explosion_position.v[1], enemy->explosion_position.v[2]);
+                    
+                    // Initialize explosion matrix immediately
+                    float exp_scale[3] = {1.0f, 1.0f, 1.0f};
+                    float exp_rotation[3] = {0.0f, 0.0f, 0.0f};
+                    float exp_position[3] = {enemy->explosion_position.v[0], 
+                                            enemy->explosion_position.v[1], 
+                                            enemy->explosion_position.v[2]};
+                    t3d_mat4fp_from_srt_euler(orch->explosion_matrices[i], exp_scale, exp_rotation, exp_position);
+                    
                     // Deactivate collision boxes
                     for (int k = enemy->collision_start_index; k < enemy->collision_start_index + enemy->collision_count; k++) {
                         if (k < orch->collision_system->count) {
@@ -409,6 +441,22 @@ void enemy_orchestrator_update_level1(EnemyOrchestrator* orch, float delta_time)
             orch->active_count--;
         }
     }
+    
+    // Update explosions
+    for (int i = 0; i < MAX_ENEMIES; i++) {
+        if (orch->enemies[i].has_explosion) {
+            EnemyInstance* enemy = &orch->enemies[i];
+            enemy->explosion_timer -= delta_time;
+            
+            if (enemy->explosion_timer <= 0.0f) {
+                enemy->has_explosion = false;
+                float far_scale[3] = {0.0f, 0.0f, 0.0f};
+                float far_rotation[3] = {0.0f, 0.0f, 0.0f};
+                float far_position[3] = {0.0f, -10000.0f, 0.0f};
+                t3d_mat4fp_from_srt_euler(orch->explosion_matrices[i], far_scale, far_rotation, far_position);
+            }
+        }
+    }
 }
 
 /**
@@ -587,6 +635,22 @@ static void enemy_orchestrator_update_common(EnemyOrchestrator* orch, float delt
             debugf("Enemy %d destroyed\n", i);
         }
     }
+    
+    // Update explosions
+    for (int i = 0; i < MAX_ENEMIES; i++) {
+        if (orch->enemies[i].has_explosion) {
+            EnemyInstance* enemy = &orch->enemies[i];
+            enemy->explosion_timer -= delta_time;
+            
+            if (enemy->explosion_timer <= 0.0f) {
+                enemy->has_explosion = false;
+                float far_scale[3] = {0.0f, 0.0f, 0.0f};
+                float far_rotation[3] = {0.0f, 0.0f, 0.0f};
+                float far_position[3] = {0.0f, -10000.0f, 0.0f};
+                t3d_mat4fp_from_srt_euler(orch->explosion_matrices[i], far_scale, far_rotation, far_position);
+            }
+        }
+    }
 }
 
 T3DMat4FP* enemy_orchestrator_get_matrix(EnemyOrchestrator* orch, int index) {
@@ -615,6 +679,24 @@ int enemy_orchestrator_get_active_count(EnemyOrchestrator* orch) {
 }
 
 void enemy_orchestrator_cleanup(EnemyOrchestrator* orch) {
+    // Free explosion model
+    if (orch->explosion_model) {
+        t3d_model_free(orch->explosion_model);
+        orch->explosion_model = NULL;
+    }
+    
+    // Free explosion matrices
+    if (orch->explosion_matrices) {
+        for (int i = 0; i < MAX_ENEMIES; i++) {
+            if (orch->explosion_matrices[i]) {
+                free_uncached(orch->explosion_matrices[i]);
+            }
+        }
+        free_uncached(orch->explosion_matrices);
+        orch->explosion_matrices = NULL;
+    }
+    
+    // Free enemy matrices
     for (int i = 0; i < MAX_ENEMIES; i++) {
         if (orch->enemies[i].matrix) {
             free_uncached(orch->enemies[i].matrix);
@@ -657,4 +739,26 @@ void enemy_orchestrator_spawn_projectiles_level1(EnemyOrchestrator* orch, void* 
             }
         }
     }
+}
+
+bool enemy_orchestrator_all_waves_complete(EnemyOrchestrator* orch, int max_waves) {
+    return orch->wave_count >= max_waves && orch->active_count == 0;
+}
+
+T3DMat4FP* enemy_orchestrator_get_explosion_matrix(EnemyOrchestrator* orch, int index) {
+    if (index >= 0 && index < MAX_ENEMIES && orch->enemies[index].has_explosion) {
+        return orch->explosion_matrices[index];
+    }
+    return NULL;
+}
+
+bool enemy_orchestrator_has_explosion(EnemyOrchestrator* orch, int index) {
+    if (index >= 0 && index < MAX_ENEMIES) {
+        return orch->enemies[index].has_explosion;
+    }
+    return false;
+}
+
+T3DModel* enemy_orchestrator_get_explosion_model(EnemyOrchestrator* orch) {
+    return orch->explosion_model;
 }

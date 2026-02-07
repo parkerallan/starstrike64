@@ -25,8 +25,8 @@ void level1_init(Level1* level, rdpq_font_t* font) {
         // Initialize animation system
         animation_system_init(&level->anim_system, level->mecha_model, level->skeleton);
         
-        // Start with idle animation
-        animation_system_play(&level->anim_system, "Idle", true);
+        // Start with CombatLeft animation (since player starts at center which is "left")
+        animation_system_play(&level->anim_system, "CombatLeft", true);
     } else {
         debugf("No skeleton found in model\n");
         level->skeleton = NULL;
@@ -35,6 +35,20 @@ void level1_init(Level1* level, rdpq_font_t* font) {
     // Allocate model matrix
     level->modelMat = malloc_uncached(sizeof(T3DMat4FP));
     t3d_mat4fp_identity(level->modelMat);
+    
+    // Load explosion model
+    level->explosion_model = t3d_model_load("rom:/explosion.t3dm");
+    if (!level->explosion_model) {
+        debugf("WARNING: Failed to load explosion model\n");
+    } else {
+        debugf("Successfully loaded explosion model\n");
+    }
+    level->explosionMat = malloc_uncached(sizeof(T3DMat4FP));
+    // Initialize explosion at player starting position (off-screen below)
+    float exp_scale[3] = {1.0f, 1.0f, 1.0f};
+    float exp_rotation[3] = {0.0f, 0.0f, 0.0f};
+    float exp_position[3] = {0.0f, -250.0f, 0.0f};
+    t3d_mat4fp_from_srt_euler(level->explosionMat, exp_scale, exp_rotation, exp_position);
 
     // Load stars map
     level->stars_model = t3d_model_load("rom:/stars.t3dm");
@@ -105,6 +119,10 @@ void level1_init(Level1* level, rdpq_font_t* font) {
     // Initialize hit display
     level->show_enemy_hit = false;
     level->enemy_hit_timer = 0.0f;
+    
+    // Initialize victory state
+    level->victory = false;
+    level->victory_timer = 0.0f;
     
     // Initialize player health system
     player_health_init(&level->player_health, &level->collision_system);
@@ -180,8 +198,75 @@ int level1_update(Level1* level) {
     joypad_buttons_t btn_held = joypad_get_buttons_held(JOYPAD_PORT_1);
     joypad_inputs_t inputs = joypad_get_inputs(JOYPAD_PORT_1);
     
-    // Update player controls
+    // Update player health system first (needed for death timer)
+    player_health_update(&level->player_health, delta_time);
+    
+    // Update explosion position when dead
+    if (player_health_is_dead(&level->player_health)) {
+        // Position explosion at player location (offset up by 100 units)
+        T3DVec3 player_pos = playercontrols_get_position(&level->player_controls);
+        float scale[3] = {1.0f, 1.0f, 1.0f};
+        float rotation[3] = {0.0f, 0.0f, 0.0f};
+        float position[3] = {player_pos.v[0], player_pos.v[1] + 100.0f, player_pos.v[2]};
+        t3d_mat4fp_from_srt_euler(level->explosionMat, scale, rotation, position);
+    }
+    
+    // Check for death reload
+    if (player_health_should_reload(&level->player_health)) {
+        return LEVEL_1;  // Reload same level
+    }
+    
+    // If player is dead, skip gameplay updates but still render
+    if (player_health_is_dead(&level->player_health)) {
+        goto skip_to_camera;
+    }
+    
+    // Check for victory condition
+    if (!level->victory && enemy_orchestrator_all_waves_complete(&level->enemy_orchestrator, 5)) {
+        level->victory = true;
+        level->victory_timer = 0.0f;
+        
+        // Move player to center of boundary
+        float center_x = (level->player_controls.boundary.min_x + level->player_controls.boundary.max_x) / 2.0f;
+        T3DVec3 center_pos = {{center_x, level->player_controls.position.v[1], level->player_controls.position.v[2]}};
+        playercontrols_set_position(&level->player_controls, center_pos);
+        
+        // Play Boost animation
+        animation_system_play(&level->anim_system, "Boost", false);
+    }
+    
+    // Update victory timer and advance to next level
+    if (level->victory) {
+        level->victory_timer += delta_time;
+        if (level->victory_timer >= 3.0f) {
+            return LEVEL_2;
+        }
+        // Skip rest of update during victory
+        goto skip_to_camera;
+    }
+    
+    // Update player controls (skip during victory)
     playercontrols_update(&level->player_controls, inputs, delta_time);
+    
+    // Update slash timer
+    if (level->is_slashing) {
+        level->slash_timer -= delta_time;
+        if (level->slash_timer <= 0.0f) {
+            level->is_slashing = false;
+        }
+    }
+    
+    // Update player animation based on position and state (with blending)
+    T3DVec3 player_pos = playercontrols_get_position(&level->player_controls);
+    float boundary_width = level->player_controls.boundary.max_x - level->player_controls.boundary.min_x;
+    float normalized_x = (player_pos.v[0] - level->player_controls.boundary.min_x) / boundary_width;
+    
+    // Choose animation set based on whether slashing or in combat idle
+    if (level->is_slashing) {
+        animation_system_update_position_blend(&level->anim_system, normalized_x, "SlashLeft", "SlashRight", false);
+    } else {
+        animation_system_update_position_blend(&level->anim_system, normalized_x, "CombatLeft", "CombatRight", true);
+    }
     
     // Update outfit system
     outfit_system_update(&level->outfit_system, delta_time);
@@ -194,9 +279,6 @@ int level1_update(Level1* level) {
     
     // Update title animation
     title_animation_update(&level->title_anim, delta_time);
-    
-    // Update player health system
-    player_health_update(&level->player_health, delta_time);
     
     // Update collision boxes to match current player position
     collision_system_update_boxes_by_type(&level->collision_system, COLLISION_PLAYER, level->modelMat);
@@ -228,23 +310,28 @@ int level1_update(Level1* level) {
 
     // A button - shoot slash projectile (hold for continuous fire)
     if (btn_held.a && projectile_system_can_shoot(&level->projectile_system, PROJECTILE_SLASH)) {
-        T3DVec3 player_pos = playercontrols_get_position(&level->player_controls);
         T3DVec3 spawn_pos = {{player_pos.v[0], player_pos.v[1] + 100.0f, player_pos.v[2]}};
         T3DVec3 shoot_direction = {{0.0f, 0.0f, -1.0f}};
         projectile_system_spawn(&level->projectile_system, spawn_pos, shoot_direction, PROJECTILE_SLASH);
         // Activate thrust outfit for 1.5 seconds
         outfit_system_activate_thrust(&level->outfit_system, 1.5f);
+        // Trigger slash animation (duration matches slash cooldown)
+        level->is_slashing = true;
+        level->slash_timer = 1.5f;
     }
     
     // B button - shoot normal projectile (hold for continuous fire)
     if (btn_held.b && projectile_system_can_shoot(&level->projectile_system, PROJECTILE_NORMAL)) {
-        T3DVec3 player_pos = playercontrols_get_position(&level->player_controls);
         // Offset spawn position to the right and higher (where gun would be)
         T3DVec3 spawn_pos = {{player_pos.v[0], player_pos.v[1] + 100.0f, player_pos.v[2]}};
         T3DVec3 shoot_direction = {{0.0f, 0.0f, -1.0f}};  // Forward direction
         projectile_system_spawn(&level->projectile_system, spawn_pos, shoot_direction, PROJECTILE_NORMAL);
     }
 
+skip_to_camera:
+    // Update player position for rendering
+    player_pos = playercontrols_get_position(&level->player_controls);
+    
     // Start button - go to next level
     if (btn.start) {
         debugf("Going to Level 2\n");
@@ -258,8 +345,7 @@ int level1_update(Level1* level) {
     t3d_viewport_set_projection(&level->viewport, T3D_DEG_TO_RAD(60.0f), 20.0f, 1000.0f);
     t3d_viewport_look_at(&level->viewport, &camPos, &camTarget, &(T3DVec3){{0,1,0}});
 
-    // Set model matrix based on player position
-    T3DVec3 player_pos = playercontrols_get_position(&level->player_controls);
+    // Set model matrix based on player position (reuse player_pos from earlier)
     float scale[3] = {1.0f, 1.0f, 1.0f};
     float rotation[3] = {0.0f, T3D_DEG_TO_RAD(180.0f), 0.0f};
     float position[3] = {player_pos.v[0], player_pos.v[1], player_pos.v[2]};
@@ -340,9 +426,54 @@ void level1_render(Level1* level) {
             }
         }
     }
+    
+    // Draw enemy explosions
+    T3DModel* enemy_explosion_model = enemy_orchestrator_get_explosion_model(&level->enemy_orchestrator);
+    if (enemy_explosion_model) {
+        for (int i = 0; i < MAX_ENEMIES; i++) {
+            if (enemy_orchestrator_has_explosion(&level->enemy_orchestrator, i)) {
+                T3DMat4FP* explosion_mat = enemy_orchestrator_get_explosion_matrix(&level->enemy_orchestrator, i);
+                if (explosion_mat) {
+                    t3d_matrix_push(explosion_mat);
+                    
+                    T3DModelDrawConf explosionDrawConf = {
+                        .userData = NULL,
+                        .tileCb = NULL,
+                        .filterCb = NULL,
+                        .dynTextureCb = NULL,
+                        .matrices = NULL
+                    };
+                    
+                    t3d_model_draw_custom(enemy_explosion_model, explosionDrawConf);
+                    t3d_matrix_pop(1);
+                }
+            }
+        }
+    }
 
-    // Draw mecha model if loaded
-    if (level->mecha_model) {
+    // Draw mecha model if loaded and player is alive, or explosion if dead
+    if (player_health_is_dead(&level->player_health) && level->explosion_model) {
+        // Draw explosion higher up
+        t3d_matrix_push(level->explosionMat);
+        
+        T3DModelDrawConf drawConf = {
+            .userData = NULL,
+            .tileCb = NULL,
+            .filterCb = NULL,
+            .dynTextureCb = NULL,
+            .matrices = NULL
+        };
+        
+        t3d_model_draw_custom(level->explosion_model, drawConf);
+        t3d_matrix_pop(1);
+    } else if (level->mecha_model) {
+        // Apply red lighting if player is flashing
+        if (player_health_is_flashing(&level->player_health)) {
+            uint8_t flashColor[4] = {255, 80, 80, 0xFF};
+            t3d_light_set_ambient(flashColor);
+            t3d_light_set_directional(0, flashColor, &level->lightDirVec);
+        }
+        
         t3d_matrix_push(level->modelMat);
         
         T3DModelDrawConf drawConf = {
@@ -355,6 +486,12 @@ void level1_render(Level1* level) {
         
         t3d_model_draw_custom(level->mecha_model, drawConf);
         t3d_matrix_pop(1);
+        
+        // Restore normal lighting
+        if (player_health_is_flashing(&level->player_health)) {
+            t3d_light_set_ambient(level->colorAmbient);
+            t3d_light_set_directional(0, level->colorDir, &level->lightDirVec);
+        }
     }
 
     // Draw projectiles
@@ -390,6 +527,10 @@ void level1_cleanup(Level1* level) {
         t3d_model_free(level->mecha_model);
     }
     
+    if (level->explosion_model) {
+        t3d_model_free(level->explosion_model);
+    }
+    
     if (level->stars_model) {
         t3d_model_free(level->stars_model);
     }
@@ -403,6 +544,10 @@ void level1_cleanup(Level1* level) {
 
     if (level->modelMat) {
         free_uncached(level->modelMat);
+    }
+    
+    if (level->explosionMat) {
+        free_uncached(level->explosionMat);
     }
     
     if (level->starsMat) {

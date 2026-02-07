@@ -23,6 +23,10 @@ typedef struct {
     AnimationSystem anim_system;
     T3DMat4FP* modelMat;
     
+    // Explosion model
+    T3DModel* explosion_model;
+    T3DMat4FP* explosionMat;
+    
     // Stars map model
     T3DModel* stars_model;
     T3DSkeleton* stars_skeleton;
@@ -35,6 +39,14 @@ typedef struct {
     
     // Player controls
     PlayerControls player_controls;
+    
+    // Player animation state
+    bool is_slashing;
+    float slash_timer;
+    
+    // Victory state
+    bool victory;
+    float victory_timer;
     
     // Outfit system
     OutfitSystem outfit_system;

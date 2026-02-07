@@ -110,7 +110,7 @@ int main() {
         }
         
         // Handle scene transition if requested (transition_result >= 0)
-        if (transition_result >= 0 && transition_result != current_scene) {
+        if (transition_result >= 0) {
             // Cleanup current scene
             switch (current_scene) {
                 case SCENE_INTRO:

@@ -15,6 +15,9 @@ void player_health_init(PlayerHealthSystem* system, CollisionSystem* collision_s
     system->is_dead = false;
     system->hit_display_timer = 0.0f;
     system->show_hit = false;
+    system->flash_timer = 0.0f;
+    system->flash_duration = 0.15f;  // Flash for 150ms
+    system->death_timer = 0.0f;
     
     debugf("Player initialized with %d health\n", system->health);
     
@@ -31,6 +34,7 @@ bool player_health_take_damage(PlayerHealthSystem* system, int damage) {
     system->health -= damage;
     system->show_hit = true;
     system->hit_display_timer = 0.5f;
+    system->flash_timer = system->flash_duration;  // Start flash
     
     debugf("Player hit! Health: %d/%d\n", system->health, system->max_health);
     
@@ -49,6 +53,19 @@ void player_health_update(PlayerHealthSystem* system, float delta_time) {
         if (system->hit_display_timer <= 0.0f) {
             system->show_hit = false;
         }
+    }
+    
+    // Update flash timer
+    if (system->flash_timer > 0.0f) {
+        system->flash_timer -= delta_time;
+        if (system->flash_timer < 0.0f) {
+            system->flash_timer = 0.0f;
+        }
+    }
+    
+    // Update death timer
+    if (system->is_dead && system->death_timer < 5.0f) {
+        system->death_timer += delta_time;
     }
 }
 
@@ -74,8 +91,8 @@ void player_health_render(PlayerHealthSystem* system) {
             rdpq_sprite_blit(system->health_sprite, start_x + (i * spacing), 10, &params);
         }
     } else if (system->is_dead) {
-        // Draw GAME OVER in center of screen
-        rdpq_text_printf(NULL, 1, 120, 110, "GAME OVER");
+        // Draw DESTROYED in center of screen
+        rdpq_text_printf(NULL, 1, 115, 110, "DESTROYED");
     }
 }
 
@@ -83,8 +100,16 @@ bool player_health_is_dead(PlayerHealthSystem* system) {
     return system->is_dead;
 }
 
+bool player_health_should_reload(PlayerHealthSystem* system) {
+    return system->is_dead && system->death_timer >= 5.0f;
+}
+
 bool player_health_is_showing_hit(PlayerHealthSystem* system) {
     return system->show_hit;
+}
+
+bool player_health_is_flashing(PlayerHealthSystem* system) {
+    return system->flash_timer > 0.0f;
 }
 
 void player_health_cleanup(PlayerHealthSystem* system) {

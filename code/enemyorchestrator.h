@@ -25,6 +25,9 @@ typedef struct {
     int movement_phase;         // 0=flying in, 1=paused, 2=flying off
     float phase_timer;          // Timer for current phase
     float shoot_timer;          // Timer for shooting projectiles
+    bool has_explosion;         // True if explosion is active
+    float explosion_timer;      // Timer for explosion display (1 second)
+    T3DVec3 explosion_position; // Position where explosion should appear
 } EnemyInstance;
 
 // Enemy orchestrator for a level
@@ -36,6 +39,8 @@ typedef struct {
     float last_spawn_time;  // Track last spawn for patterns
     int active_count;
     int wave_count;         // Track number of waves spawned (for level 1)
+    T3DModel* explosion_model;  // Shared explosion model for all enemies
+    T3DMat4FP** explosion_matrices;  // Array of matrices for each explosion
 } EnemyOrchestrator;
 
 // Initialize orchestrator
@@ -72,6 +77,18 @@ bool enemy_orchestrator_is_active(EnemyOrchestrator* orch, int index);
 
 // Get active enemy count
 int enemy_orchestrator_get_active_count(EnemyOrchestrator* orch);
+
+// Check if all waves are complete and no enemies remain
+bool enemy_orchestrator_all_waves_complete(EnemyOrchestrator* orch, int max_waves);
+
+// Get explosion matrix for rendering (returns NULL if no explosion)
+T3DMat4FP* enemy_orchestrator_get_explosion_matrix(EnemyOrchestrator* orch, int index);
+
+// Check if enemy has active explosion
+bool enemy_orchestrator_has_explosion(EnemyOrchestrator* orch, int index);
+
+// Get explosion model
+T3DModel* enemy_orchestrator_get_explosion_model(EnemyOrchestrator* orch);
 
 // Cleanup
 void enemy_orchestrator_cleanup(EnemyOrchestrator* orch);

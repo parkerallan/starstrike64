@@ -334,8 +334,8 @@ skip_to_camera:
     
     // Start button - go to next level
     // if (btn.start) {
-    //     debugf("Going to Level 2\n");
-    //     return LEVEL_2;
+    //     debugf("Going to Level 5\n");
+    //     return LEVEL_5;
     // }
 
     // Set up camera

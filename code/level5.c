@@ -132,7 +132,7 @@ void level5_init(Level5* level, rdpq_font_t* font) {
     t3d_vec3_norm(&level->lightDirVec);
 
     // Load and start music
-    wav64_open(&level->music, "rom:/Swords.wav64");
+    wav64_open(&level->music, "rom:/Canter_Ninety.wav64");
     wav64_set_loop(&level->music, true);
     mixer_ch_set_limits(0, 0, 48000, 0);
     wav64_play(&level->music, 0);

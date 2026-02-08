@@ -1116,8 +1116,9 @@ void enemy_orchestrator_init_level4_boss(EnemyOrchestrator* orch, CollisionSyste
     boss->collision_count = collision_system->count - collision_before;
     collision_system_update_boxes_by_range(collision_system, boss->collision_start_index, boss->collision_count, boss->matrix);
     
-    // Initialize with 50 HP
-    enemy_system_init(&boss->system, 50);
+    // Initialize with health from mesh name
+    int boss_health = collision_system_get_enemy_health(collision_system);
+    enemy_system_init(&boss->system, boss_health);
     boss->active = true;
     boss->show_hit = false;
     boss->hit_timer = 0.0f;
@@ -1126,7 +1127,7 @@ void enemy_orchestrator_init_level4_boss(EnemyOrchestrator* orch, CollisionSyste
     boss->phase_timer = 0.0f;
     
     orch->active_count = 1;
-    debugf("Boss initialized: 50 HP\n");
+    debugf("Boss initialized: %d HP\n", boss_health);
 }
 
 void enemy_orchestrator_update_level4_boss(EnemyOrchestrator* orch, float delta_time, void* projectile_system_ptr) {
@@ -1380,8 +1381,9 @@ void enemy_orchestrator_init_level5_boss(EnemyOrchestrator* orch, CollisionSyste
     boss->collision_count = collision_system->count - collision_before;
     collision_system_update_boxes_by_range(collision_system, boss->collision_start_index, boss->collision_count, boss->matrix);
     
-    // Initialize with 100 HP (final boss)
-    enemy_system_init(&boss->system, 100);
+    // Initialize with health from mesh name
+    int boss_health = collision_system_get_enemy_health(collision_system);
+    enemy_system_init(&boss->system, boss_health);
     boss->active = true;
     boss->show_hit = false;
     boss->hit_timer = 0.0f;
@@ -1390,7 +1392,7 @@ void enemy_orchestrator_init_level5_boss(EnemyOrchestrator* orch, CollisionSyste
     boss->phase_timer = 0.0f;
     
     orch->active_count = 1;
-    debugf("Level 5 Boss initialized: 100 HP\n");
+    debugf("Level 5 Boss initialized: %d HP\n", boss_health);
 }
 
 void enemy_orchestrator_update_level5_boss(EnemyOrchestrator* orch, float delta_time, void* projectile_system_ptr) {
@@ -1454,7 +1456,7 @@ void enemy_orchestrator_update_level5_boss(EnemyOrchestrator* orch, float delta_
         
         // Shoot tightly packed projectiles that curve
         boss->shoot_timer += delta_time;
-        if (boss->shoot_timer >= 0.1f) {
+        if (boss->shoot_timer >= 0.25f) {
             boss->shoot_timer = 0.0f;
             
             // Update curve direction

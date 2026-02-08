@@ -100,8 +100,8 @@ void level4_init(Level4* level, rdpq_font_t* font) {
     // Extract collision boxes from player model
     collision_system_extract_from_model(&level->collision_system, level->mecha_model, "PLAYER_", COLLISION_PLAYER);
     
-    // Initialize enemy orchestrator
-    enemy_orchestrator_init(&level->enemy_orchestrator, level->enemy_model, &level->collision_system);
+    // Initialize Level 4 boss orchestrator
+    enemy_orchestrator_init_level4_boss(&level->enemy_orchestrator, &level->collision_system);
     
     debugf("Collision system initialized with %d boxes\n", level->collision_system.count);
     
@@ -180,8 +180,8 @@ int level4_update(Level4* level) {
         goto skip_to_camera;
     }
     
-    // Check for victory condition
-    if (!level->victory && enemy_orchestrator_all_waves_complete(&level->enemy_orchestrator, 5)) {
+    // Check for victory condition - boss is defeated
+    if (!level->victory && enemy_orchestrator_get_active_count(&level->enemy_orchestrator) == 0) {
         level->victory = true;
         level->victory_timer = 0.0f;
         
@@ -230,30 +230,39 @@ int level4_update(Level4* level) {
     // Update outfit system
     outfit_system_update(&level->outfit_system, delta_time);
     
-    // Update enemy orchestrator (handles spawning, movement, and individual enemy systems)
-    enemy_orchestrator_update_level2(&level->enemy_orchestrator, delta_time);
-    
-    // Manual projectile collision checking with each enemy
-    for (int p = 0; p < MAX_PROJECTILES; p++) {
-        Projectile* proj = projectile_system_get_projectile(&level->projectile_system, p);
-        if (proj && proj->active) {
-            T3DVec3 proj_pos = proj->position;
-            int enemy_index = -1;
-            int damage = (proj->type == PROJECTILE_SLASH) ? 3 : 1;
-            
-            // Check if projectile hits any enemy
-            if (enemy_orchestrator_check_hit(&level->enemy_orchestrator, &proj_pos, &enemy_index, damage)) {
-                // Hit detected, deactivate projectile
-                projectile_system_deactivate(&level->projectile_system, p);
-            }
-        }
-    }
-    
-    // Update projectile system (movement and rendering)
-    projectile_system_update(&level->projectile_system, delta_time);
+    // Update Level 4 boss
+    enemy_orchestrator_update_level4_boss(&level->enemy_orchestrator, delta_time, &level->projectile_system);
     
     // Update title animation
     title_animation_update(&level->title_anim, delta_time);
+    
+    // Update collision boxes to match current player position
+    collision_system_update_boxes_by_type(&level->collision_system, COLLISION_PLAYER, level->modelMat);
+    
+    // Update projectiles (movement only, no collision yet)
+    projectile_system_update(&level->projectile_system, delta_time);
+    
+    // Manual collision checking for projectiles
+    for (int i = 0; i < MAX_PROJECTILES; i++) {
+        Projectile* proj = projectile_system_get_projectile(&level->projectile_system, i);
+        if (!proj || !proj->active) continue;
+        
+        if (proj->is_enemy) {
+            // Enemy projectile - check collision with player
+            char hit_name[64];
+            if (!player_health_is_dead(&level->player_health) && 
+                collision_system_check_point(&level->collision_system, &proj->position, COLLISION_PLAYER, hit_name)) {
+                player_health_take_damage(&level->player_health, 1);
+                projectile_system_deactivate(&level->projectile_system, i);
+            }
+        } else {
+            // Player projectile - check collision with boss
+            int enemy_index = -1;
+            if (enemy_orchestrator_check_hit(&level->enemy_orchestrator, &proj->position, &enemy_index, proj->damage)) {
+                projectile_system_deactivate(&level->projectile_system, i);
+            }
+        }
+    }
     
     // A button - shoot slash projectile (hold for continuous fire)
     if (btn_held.a && projectile_system_can_shoot(&level->projectile_system, PROJECTILE_SLASH)) {
@@ -323,6 +332,14 @@ void level4_render(Level4* level) {
     }
     
     // Draw all active enemies from orchestrator
+    T3DModel* boss_model = enemy_orchestrator_get_boss_model(&level->enemy_orchestrator);
+    T3DSkeleton* boss_skeleton = enemy_orchestrator_get_boss_skeleton(&level->enemy_orchestrator);
+    
+    // Update boss skeleton before rendering
+    if (boss_skeleton) {
+        t3d_skeleton_update(boss_skeleton);
+    }
+    
     for (int i = 0; i < MAX_ENEMIES; i++) {
         if (!enemy_orchestrator_is_active(&level->enemy_orchestrator, i)) continue;
         
@@ -339,15 +356,19 @@ void level4_render(Level4* level) {
             
             t3d_matrix_push(enemy_mat);
             
+            // Use boss model and skeleton for the boss (enemy index 0)
+            T3DModel* render_model = (i == 0 && boss_model) ? boss_model : level->enemy_model;
+            T3DSkeleton* render_skeleton = (i == 0 && boss_skeleton) ? boss_skeleton : NULL;
+            
             T3DModelDrawConf enemyDrawConf = {
                 .userData = NULL,
                 .tileCb = NULL,
                 .filterCb = NULL,
                 .dynTextureCb = NULL,
-                .matrices = NULL
+                .matrices = render_skeleton ? render_skeleton->boneMatricesFP : NULL
             };
             
-            t3d_model_draw_custom(level->enemy_model, enemyDrawConf);
+            t3d_model_draw_custom(render_model, enemyDrawConf);
             
             t3d_matrix_pop(1);
             

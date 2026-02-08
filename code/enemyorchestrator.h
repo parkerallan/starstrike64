@@ -47,6 +47,15 @@ typedef struct {
     T3DMat4FP** explosion_matrices;  // Array of matrices for each explosion
     int bomber_phase;       // 0=retreat, 1=approach, 2=strafe, 3=transition_to_wave, 4=wave pattern
     float bomber_phase_timer;  // Timer for bomber phase transitions
+    
+    // Level 4 boss state
+    T3DModel* boss_model;
+    T3DSkeleton* boss_skeleton;
+    AnimationSystem boss_anim;
+    float boss_side_progress;  // 0-1 for side-to-side movement
+    bool boss_moving_right;
+    float boss_barrage_cooldown;
+    float boss_spin_timer;
 } EnemyOrchestrator;
 
 // Initialize orchestrator
@@ -107,5 +116,11 @@ void enemy_orchestrator_spawn_projectiles_level2(EnemyOrchestrator* orch, void* 
 
 // Spawn enemy projectiles during level 3 (zigzag pattern)
 void enemy_orchestrator_spawn_projectiles_level3(EnemyOrchestrator* orch, void* projectile_system, float delta_time);
+
+// Level 4 Boss functions
+void enemy_orchestrator_init_level4_boss(EnemyOrchestrator* orch, CollisionSystem* collision_system);
+void enemy_orchestrator_update_level4_boss(EnemyOrchestrator* orch, float delta_time, void* projectile_system);
+T3DModel* enemy_orchestrator_get_boss_model(EnemyOrchestrator* orch);
+T3DSkeleton* enemy_orchestrator_get_boss_skeleton(EnemyOrchestrator* orch);
 
 #endif // ENEMYORCHESTRATOR_H

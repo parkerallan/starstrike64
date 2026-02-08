@@ -78,7 +78,7 @@ void intro_init(SceneIntro* scene, rdpq_font_t* font) {
     wav64_set_loop(&scene->music, true);
     mixer_ch_set_limits(0, 0, 48000, 0);
     wav64_play(&scene->music, 0);
-    mixer_ch_set_vol(0, 0.5f, 0.5f);  // Standard volume
+    mixer_ch_set_vol(0, 0.25f, 0.25f);  // Standard volume
 
     debugf("Intro scene initialized\n");
 }

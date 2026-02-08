@@ -136,7 +136,7 @@ void level5_init(Level5* level, rdpq_font_t* font) {
     wav64_set_loop(&level->music, true);
     mixer_ch_set_limits(0, 0, 48000, 0);
     wav64_play(&level->music, 0);
-    mixer_ch_set_vol(0, 0.5f, 0.5f);  // Standard volume
+    mixer_ch_set_vol(0, 0.25f, 0.25f);  // Standard volume
 }
 
 int level5_update(Level5* level) {

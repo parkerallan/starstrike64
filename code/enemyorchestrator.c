@@ -1037,3 +1037,266 @@ bool enemy_orchestrator_has_explosion(EnemyOrchestrator* orch, int index) {
 T3DModel* enemy_orchestrator_get_explosion_model(EnemyOrchestrator* orch) {
     return orch->explosion_model;
 }
+
+// Level 4 Boss Implementation
+void enemy_orchestrator_init_level4_boss(EnemyOrchestrator* orch, CollisionSystem* collision_system) {
+    orch->enemy_model = NULL;
+    orch->bomber_model = NULL;
+    orch->bomber_skeleton = NULL;
+    orch->bomber_anim_system = NULL;
+    orch->collision_system = collision_system;
+    orch->elapsed_time = 0.0f;
+    orch->last_spawn_time = 0.0f;
+    orch->active_count = 0;
+    orch->wave_count = 0;
+    orch->bomber_phase = 0;
+    orch->bomber_phase_timer = 0.0f;
+    
+    // Load explosion model
+    orch->explosion_model = t3d_model_load("rom:/explosion.t3dm");
+    
+    // Allocate explosion matrices
+    orch->explosion_matrices = malloc_uncached(sizeof(T3DMat4FP*) * MAX_ENEMIES);
+    for (int i = 0; i < MAX_ENEMIES; i++) {
+        orch->explosion_matrices[i] = malloc_uncached(sizeof(T3DMat4FP));
+        t3d_mat4fp_identity(orch->explosion_matrices[i]);
+    }
+    
+    // Initialize all enemy slots
+    for (int i = 0; i < MAX_ENEMIES; i++) {
+        orch->enemies[i].matrix = malloc_uncached(sizeof(T3DMat4FP));
+        t3d_mat4fp_identity(orch->enemies[i].matrix);
+        orch->enemies[i].active = false;
+        orch->enemies[i].collision_start_index = -1;
+        orch->enemies[i].collision_count = 0;
+        orch->enemies[i].movement_phase = 0;
+        orch->enemies[i].phase_timer = 0.0f;
+        orch->enemies[i].shoot_timer = 0.0f;
+        orch->enemies[i].has_explosion = false;
+        orch->enemies[i].explosion_timer = 0.0f;
+    }
+    
+    // Load boss model
+    orch->boss_model = t3d_model_load("rom:/enemy3.t3dm");
+    if (!orch->boss_model) {
+        debugf("ERROR: Failed to load enemy3.t3dm for boss\n");
+        return;
+    }
+    
+    // Initialize boss skeleton and animation
+    const T3DChunkSkeleton* skelChunk = t3d_model_get_skeleton(orch->boss_model);
+    if (skelChunk) {
+        orch->boss_skeleton = malloc_uncached(sizeof(T3DSkeleton));
+        *orch->boss_skeleton = t3d_skeleton_create(orch->boss_model);
+        animation_system_init(&orch->boss_anim, orch->boss_model, orch->boss_skeleton);
+        animation_system_play(&orch->boss_anim, "Idle", true);
+    }
+    
+    // Initialize boss movement state
+    orch->boss_side_progress = 0.5f;
+    orch->boss_moving_right = true;
+    orch->boss_barrage_cooldown = 10.0f;
+    orch->boss_spin_timer = 0.0f;
+    
+    // Spawn boss in slot 0
+    EnemyInstance* boss = &orch->enemies[0];
+    boss->position = (T3DVec3){{0.0f, -100.0f, -300.0f}};
+    boss->velocity = (T3DVec3){{0.0f, 0.0f, 0.0f}};
+    
+    // Setup transform with scale 1.0
+    float scale[3] = {1.0f, 1.0f, 1.0f};
+    float rotation[3] = {0.0f, 0.0f, 0.0f};
+    float position[3] = {0.0f, -100.0f, -300.0f};
+    t3d_mat4fp_from_srt_euler(boss->matrix, scale, rotation, position);
+    
+    // Extract collision
+    int collision_before = collision_system->count;
+    collision_system_extract_from_model(collision_system, orch->boss_model, "ENEMY_", COLLISION_ENEMY);
+    boss->collision_start_index = collision_before;
+    boss->collision_count = collision_system->count - collision_before;
+    collision_system_update_boxes_by_range(collision_system, boss->collision_start_index, boss->collision_count, boss->matrix);
+    
+    // Initialize with 50 HP
+    enemy_system_init(&boss->system, 50);
+    boss->active = true;
+    boss->show_hit = false;
+    boss->hit_timer = 0.0f;
+    boss->shoot_timer = 0.0f;
+    boss->movement_phase = 0;
+    boss->phase_timer = 0.0f;
+    
+    orch->active_count = 1;
+    debugf("Boss initialized: 50 HP\n");
+}
+
+void enemy_orchestrator_update_level4_boss(EnemyOrchestrator* orch, float delta_time, void* projectile_system_ptr) {
+    if (delta_time <= 0.0f || delta_time > 1.0f) delta_time = 0.016f;
+    
+    ProjectileSystem* ps = (ProjectileSystem*)projectile_system_ptr;
+    orch->elapsed_time += delta_time;
+    
+    if (!orch->boss_model || !orch->boss_skeleton) return;
+    
+    EnemyInstance* boss = &orch->enemies[0];
+    if (!boss->active) return;
+    
+    // Update health system
+    enemy_system_update(&boss->system, delta_time, &boss->show_hit, &boss->hit_timer, 
+                       orch->collision_system, boss->system.last_damage_taken);
+    
+    // Check defeat
+    if (!boss->system.active && !boss->has_explosion) {
+        boss->active = false;
+        boss->has_explosion = true;
+        boss->explosion_timer = 0.25f;
+        boss->explosion_position = boss->position;
+        orch->active_count = 0;
+        
+        float exp_scale[3] = {3.0f, 3.0f, 3.0f};
+        float exp_rotation[3] = {0.0f, 0.0f, 0.0f};
+        float exp_position[3] = {boss->explosion_position.v[0], boss->explosion_position.v[1], boss->explosion_position.v[2]};
+        t3d_mat4fp_from_srt_euler(orch->explosion_matrices[0], exp_scale, exp_rotation, exp_position);
+        return;
+    }
+    
+    // Update explosion
+    if (boss->has_explosion) {
+        boss->explosion_timer -= delta_time;
+        if (boss->explosion_timer <= 0.0f) {
+            boss->has_explosion = false;
+        }
+        return;
+    }
+    
+    // Immediate phase transitions
+    if (boss->movement_phase == 0) {
+        boss->movement_phase = 1;
+        animation_system_play(&orch->boss_anim, "Move", true);
+    }
+    
+    // Side-to-side movement (both phases)
+    const float move_speed = 0.4f;
+    const float move_range = 120.0f;
+    
+    bool is_barraging = (boss->movement_phase == 2 && orch->boss_barrage_cooldown > 0.0f && orch->boss_barrage_cooldown < 3.0f);
+    
+    if (!is_barraging) {
+        if (orch->boss_moving_right) {
+            orch->boss_side_progress += move_speed * delta_time;
+            if (orch->boss_side_progress >= 1.0f) {
+                orch->boss_side_progress = 1.0f;
+                orch->boss_moving_right = false;
+            }
+        } else {
+            orch->boss_side_progress -= move_speed * delta_time;
+            if (orch->boss_side_progress <= 0.0f) {
+                orch->boss_side_progress = 0.0f;
+                orch->boss_moving_right = true;
+            }
+        }
+        boss->position.v[0] = (orch->boss_side_progress - 0.5f) * 2.0f * move_range;
+    }
+    
+    // Add sine wave vertical movement
+    orch->boss_spin_timer += delta_time;
+    boss->position.v[1] = -100.0f + sinf(orch->boss_spin_timer * 1.5f) * 30.0f;
+    
+    // Phase-specific behavior
+    if (boss->movement_phase == 1) {
+        // Phase 1: Move animation, SlashLeft/SlashRight shoot fan towards player
+        animation_system_update(&orch->boss_anim, delta_time);
+        
+        boss->shoot_timer += delta_time;
+        if (boss->shoot_timer >= 2.0f) {
+            boss->shoot_timer = 0.0f;
+            
+            // Play slash animation based on side position
+            if (orch->boss_side_progress < 0.5f) {
+                animation_system_play(&orch->boss_anim, "SlashLeft", false);
+            } else {
+                animation_system_play(&orch->boss_anim, "SlashRight", false);
+            }
+            
+            // Shoot fan of 4 projectiles angled towards player
+            float base_angle = 0.0f;  // Forward direction
+            float spread = 0.3f;  // Spread angle in radians
+            
+            T3DVec3 spawn_pos = {{boss->position.v[0], boss->position.v[1] + 100.0f, boss->position.v[2]}};
+            
+            for (int i = 0; i < 4; i++) {
+                float angle = base_angle + (i - 1.5f) * spread;
+                T3DVec3 dir = {{sinf(angle), 0.0f, cosf(angle)}};
+                t3d_vec3_norm(&dir);
+                projectile_system_spawn(ps, spawn_pos, dir, PROJECTILE_ENEMY);
+            }
+        }
+        
+        // Transition to barrage phase
+        orch->boss_barrage_cooldown -= delta_time;
+        if (orch->boss_barrage_cooldown <= 0.0f) {
+            boss->movement_phase = 2;
+            orch->boss_barrage_cooldown = 0.0f;
+        }
+        
+    } else if (boss->movement_phase == 2) {
+        // Phase 2: Move side to side, occasionally do SlashBarage with stream
+        
+        orch->boss_barrage_cooldown += delta_time;
+        
+        if (orch->boss_barrage_cooldown < 3.0f) {
+            // Doing barrage attack
+            animation_system_update(&orch->boss_anim, delta_time);
+            
+            if (orch->boss_barrage_cooldown < 0.1f) {
+                // Start barrage - stop near current position
+                animation_system_play(&orch->boss_anim, "SlashBarage", false);
+            }
+            
+            // Stream of projectiles
+            boss->shoot_timer += delta_time;
+            if (boss->shoot_timer >= 0.15f) {
+                boss->shoot_timer = 0.0f;
+                T3DVec3 spawn_pos = {{boss->position.v[0], boss->position.v[1] + 100.0f, boss->position.v[2]}};
+                T3DVec3 dir = {{0.0f, 0.0f, 1.0f}};
+                projectile_system_spawn(ps, spawn_pos, dir, PROJECTILE_ENEMY);
+            }
+        } else if (orch->boss_barrage_cooldown < 6.0f) {
+            // Moving side to side between barrages
+            animation_system_update(&orch->boss_anim, delta_time);
+            
+            if (orch->boss_barrage_cooldown > 3.1f && orch->boss_barrage_cooldown < 3.2f) {
+                animation_system_play(&orch->boss_anim, "Move", true);
+            }
+        } else {
+            // Return to phase 1
+            boss->movement_phase = 1;
+            animation_system_play(&orch->boss_anim, "Move", true);
+            orch->boss_barrage_cooldown = 10.0f;
+            boss->shoot_timer = 0.0f;
+        }
+        
+    } else {
+        // Idle fallback
+        animation_system_update(&orch->boss_anim, delta_time);
+    }
+    
+    // Update transform
+    float scale[3] = {1.0f, 1.0f, 1.0f};
+    float rotation[3] = {0.0f, 0.0f, 0.0f};
+    float position[3] = {boss->position.v[0], boss->position.v[1], boss->position.v[2]};
+    t3d_mat4fp_from_srt_euler(boss->matrix, scale, rotation, position);
+    
+    // Update collision
+    collision_system_update_boxes_by_range(orch->collision_system, 
+                                          boss->collision_start_index, 
+                                          boss->collision_count, 
+                                          boss->matrix);
+}
+
+T3DModel* enemy_orchestrator_get_boss_model(EnemyOrchestrator* orch) {
+    return orch->boss_model;
+}
+
+T3DSkeleton* enemy_orchestrator_get_boss_skeleton(EnemyOrchestrator* orch) {
+    return orch->boss_skeleton;
+}

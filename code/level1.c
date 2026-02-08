@@ -88,7 +88,7 @@ void level1_init(Level1* level, rdpq_font_t* font) {
     }
 
     // Initialize player controls with boundaries
-    T3DVec3 start_pos = {{0.0f, -150.0f, 0.0f}};
+    T3DVec3 start_pos = {{0.0f, -200.0f, 0.0f}};
     PlayerBoundary boundary = {
         .min_x = -150.0f,
         .max_x = 150.0f,
@@ -238,7 +238,7 @@ int level1_update(Level1* level) {
     // Update victory timer and advance to next level
     if (level->victory) {
         level->victory_timer += delta_time;
-        if (level->victory_timer >= 3.0f) {
+        if (level->victory_timer >= 6.0f) {
             return LEVEL_2;
         }
         // Skip rest of update during victory
@@ -308,6 +308,10 @@ int level1_update(Level1* level) {
         }
     }
 
+skip_to_camera:
+    // Update player position for rendering
+    player_pos = playercontrols_get_position(&level->player_controls);
+
     // A button - shoot slash projectile (hold for continuous fire)
     if (btn_held.a && projectile_system_can_shoot(&level->projectile_system, PROJECTILE_SLASH)) {
         T3DVec3 spawn_pos = {{player_pos.v[0], player_pos.v[1] + 100.0f, player_pos.v[2]}};
@@ -327,10 +331,6 @@ int level1_update(Level1* level) {
         T3DVec3 shoot_direction = {{0.0f, 0.0f, -1.0f}};  // Forward direction
         projectile_system_spawn(&level->projectile_system, spawn_pos, shoot_direction, PROJECTILE_NORMAL);
     }
-
-skip_to_camera:
-    // Update player position for rendering
-    player_pos = playercontrols_get_position(&level->player_controls);
     
     // Start button - go to next level
     if (btn.start) {

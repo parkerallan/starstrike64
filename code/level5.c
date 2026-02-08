@@ -73,7 +73,7 @@ void level5_init(Level5* level, rdpq_font_t* font) {
     t3d_mat4fp_from_srt_euler(level->enemyMat, enemy_scale, enemy_rotation, enemy_position);
     
     // Initialize player controls with boundaries
-    T3DVec3 start_pos = {{0.0f, -150.0f, 0.0f}};
+    T3DVec3 start_pos = {{0.0f, -200.0f, 0.0f}};
     PlayerBoundary boundary = {
         .min_x = -150.0f,
         .max_x = 150.0f,
@@ -196,8 +196,8 @@ int level5_update(Level5* level) {
     // Update victory timer and loop back to level 1
     if (level->victory) {
         level->victory_timer += delta_time;
-        if (level->victory_timer >= 3.0f) {
-            return LEVEL_1;  // Loop back to level 1
+        if (level->victory_timer >= 6.0f) {
+            return SCENE_END;  // Loop back to level 1
         }
         // Skip rest of update during victory
         goto skip_to_camera;

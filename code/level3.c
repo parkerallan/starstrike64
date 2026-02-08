@@ -73,7 +73,7 @@ void level3_init(Level3* level, rdpq_font_t* font) {
     t3d_mat4fp_from_srt_euler(level->enemyMat, enemy_scale, enemy_rotation, enemy_position);
     
     // Initialize player controls with boundaries
-    T3DVec3 start_pos = {{0.0f, -150.0f, 0.0f}};
+    T3DVec3 start_pos = {{0.0f, -200.0f, 0.0f}};
     PlayerBoundary boundary = {
         .min_x = -150.0f,
         .max_x = 150.0f,
@@ -153,6 +153,7 @@ int level3_update(Level3* level) {
         animation_system_update(&level->jupiter_anim_system, delta_time);
     }
     
+    joypad_buttons_t btn = joypad_get_buttons_pressed(JOYPAD_PORT_1);
     joypad_buttons_t btn_held = joypad_get_buttons_held(JOYPAD_PORT_1);
     joypad_inputs_t inputs = joypad_get_inputs(JOYPAD_PORT_1);
     
@@ -180,7 +181,7 @@ int level3_update(Level3* level) {
     }
     
     // Check for victory condition
-    if (!level->victory && enemy_orchestrator_all_waves_complete(&level->enemy_orchestrator, 5)) {
+    if (!level->victory && enemy_orchestrator_all_waves_complete(&level->enemy_orchestrator, 15)) {
         level->victory = true;
         level->victory_timer = 0.0f;
         
@@ -196,7 +197,7 @@ int level3_update(Level3* level) {
     // Update victory timer and advance to next level
     if (level->victory) {
         level->victory_timer += delta_time;
-        if (level->victory_timer >= 3.0f) {
+        if (level->victory_timer >= 6.0f) {
             return LEVEL_4;
         }
         // Skip rest of update during victory
@@ -232,28 +233,40 @@ int level3_update(Level3* level) {
     // Update enemy orchestrator (handles spawning, movement, and individual enemy systems)
     enemy_orchestrator_update_level3(&level->enemy_orchestrator, delta_time);
     
-    // Manual projectile collision checking with each enemy
-    for (int p = 0; p < MAX_PROJECTILES; p++) {
-        Projectile* proj = projectile_system_get_projectile(&level->projectile_system, p);
-        if (proj && proj->active) {
-            T3DVec3 proj_pos = proj->position;
-            int enemy_index = -1;
-            int damage = (proj->type == PROJECTILE_SLASH) ? 3 : 1;
-            
-            // Check if projectile hits any enemy
-            if (enemy_orchestrator_check_hit(&level->enemy_orchestrator, &proj_pos, &enemy_index, damage)) {
-                // Hit detected, deactivate projectile
-                projectile_system_deactivate(&level->projectile_system, p);
-            }
-        }
-    }
-    
-    // Update projectile system (movement and rendering)
-    projectile_system_update(&level->projectile_system, delta_time);
+    // Have enemies shoot projectiles during level 3
+    enemy_orchestrator_spawn_projectiles_level3(&level->enemy_orchestrator, &level->projectile_system, delta_time);
     
     // Update title animation
     title_animation_update(&level->title_anim, delta_time);
     
+    // Update collision boxes to match current player position
+    collision_system_update_boxes_by_type(&level->collision_system, COLLISION_PLAYER, level->modelMat);
+    
+    // Update projectiles (movement only, no collision yet)
+    projectile_system_update(&level->projectile_system, delta_time);
+    
+    // Manual collision checking for projectiles
+    for (int i = 0; i < MAX_PROJECTILES; i++) {
+        Projectile* proj = projectile_system_get_projectile(&level->projectile_system, i);
+        if (!proj || !proj->active) continue;
+        
+        if (proj->is_enemy) {
+            // Enemy projectile - check collision with player
+            char hit_name[64];
+            if (!player_health_is_dead(&level->player_health) && 
+                collision_system_check_point(&level->collision_system, &proj->position, COLLISION_PLAYER, hit_name)) {
+                player_health_take_damage(&level->player_health, 1);
+                projectile_system_deactivate(&level->projectile_system, i);
+            }
+        } else {
+            // Player projectile - check collision with enemies
+            int hit_enemy_index = -1;
+            if (enemy_orchestrator_check_hit(&level->enemy_orchestrator, &proj->position, &hit_enemy_index, proj->damage)) {
+                projectile_system_deactivate(&level->projectile_system, i);
+            }
+        }
+    }
+
     // A button - shoot slash projectile (hold for continuous fire)
     if (btn_held.a && projectile_system_can_shoot(&level->projectile_system, PROJECTILE_SLASH)) {
         T3DVec3 spawn_pos = {{player_pos.v[0], player_pos.v[1] + 100.0f, player_pos.v[2]}};
@@ -278,8 +291,9 @@ skip_to_camera:
     // Update player position for rendering
     player_pos = playercontrols_get_position(&level->player_controls);
     
-    // if (btn.start) return LEVEL_4;
-    // if (btn.b) return LEVEL_2;
+    if (btn.start){
+        return LEVEL_4; 
+    }
     
     // Set up camera
     const T3DVec3 camPos = {{0, 0.0f, 200.0f}};

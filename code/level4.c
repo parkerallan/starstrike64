@@ -73,7 +73,7 @@ void level4_init(Level4* level, rdpq_font_t* font) {
     t3d_mat4fp_from_srt_euler(level->enemyMat, enemy_scale, enemy_rotation, enemy_position);
     
     // Initialize player controls with boundaries
-    T3DVec3 start_pos = {{0.0f, -150.0f, 0.0f}};
+    T3DVec3 start_pos = {{0.0f, -200.0f, 0.0f}};
     PlayerBoundary boundary = {
         .min_x = -150.0f,
         .max_x = 150.0f,
@@ -153,6 +153,7 @@ int level4_update(Level4* level) {
         animation_system_update(&level->sun_anim_system, delta_time);
     }
     
+    joypad_buttons_t btn = joypad_get_buttons_pressed(JOYPAD_PORT_1);
     joypad_buttons_t btn_held = joypad_get_buttons_held(JOYPAD_PORT_1);
     joypad_inputs_t inputs = joypad_get_inputs(JOYPAD_PORT_1);
     
@@ -196,7 +197,7 @@ int level4_update(Level4* level) {
     // Update victory timer and advance to next level
     if (level->victory) {
         level->victory_timer += delta_time;
-        if (level->victory_timer >= 3.0f) {
+        if (level->victory_timer >= 6.0f) {
             return LEVEL_5;
         }
         // Skip rest of update during victory
@@ -278,8 +279,9 @@ skip_to_camera:
     // Update player position for rendering
     player_pos = playercontrols_get_position(&level->player_controls);
     
-    // if (btn.start) return LEVEL_5;
-    // if (btn.b) return LEVEL_3;
+    if (btn.start) {
+        return LEVEL_5; 
+    }
     
     // Set up camera
     const T3DVec3 camPos = {{0, 0.0f, 200.0f}};

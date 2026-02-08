@@ -6,6 +6,7 @@
 #include <t3d/t3dmodel.h>
 #include "collisionsystem.h"
 #include "enemysystem.h"
+#include "animationsystem.h"
 
 #define MAX_ENEMIES 16
 
@@ -34,6 +35,9 @@ typedef struct {
 typedef struct {
     EnemyInstance enemies[MAX_ENEMIES];
     T3DModel* enemy_model;
+    T3DModel* bomber_model;  // Special bomber model for level 2
+    T3DSkeleton* bomber_skeleton;  // Skeleton for bomber animation
+    AnimationSystem* bomber_anim_system;  // Animation system for bomber (pointer to avoid alignment issues)
     CollisionSystem* collision_system;
     float elapsed_time;
     float last_spawn_time;  // Track last spawn for patterns
@@ -41,6 +45,8 @@ typedef struct {
     int wave_count;         // Track number of waves spawned (for level 1)
     T3DModel* explosion_model;  // Shared explosion model for all enemies
     T3DMat4FP** explosion_matrices;  // Array of matrices for each explosion
+    int bomber_phase;       // 0=retreat, 1=approach, 2=strafe, 3=transition_to_wave, 4=wave pattern
+    float bomber_phase_timer;  // Timer for bomber phase transitions
 } EnemyOrchestrator;
 
 // Initialize orchestrator
@@ -95,5 +101,11 @@ void enemy_orchestrator_cleanup(EnemyOrchestrator* orch);
 
 // Spawn enemy projectiles during level 1 (pass projectile system from level)
 void enemy_orchestrator_spawn_projectiles_level1(EnemyOrchestrator* orch, void* projectile_system, float delta_time);
+
+// Spawn enemy projectiles during level 2 (bomber pattern)
+void enemy_orchestrator_spawn_projectiles_level2(EnemyOrchestrator* orch, void* projectile_system, float delta_time);
+
+// Spawn enemy projectiles during level 3 (zigzag pattern)
+void enemy_orchestrator_spawn_projectiles_level3(EnemyOrchestrator* orch, void* projectile_system, float delta_time);
 
 #endif // ENEMYORCHESTRATOR_H

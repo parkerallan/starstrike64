@@ -4,20 +4,23 @@
  */
 
 #include "enemyorchestrator.h"
+#include "projectilesystem.h"
 #include <stdlib.h>
 #include <string.h>
 #define M_PI 3.14159265358979323846
 
-// Forward declaration of common update helper
-static void enemy_orchestrator_update_common(EnemyOrchestrator* orch, float delta_time);
-
 void enemy_orchestrator_init(EnemyOrchestrator* orch, T3DModel* enemy_model, CollisionSystem* collision_system) {
     orch->enemy_model = enemy_model;
+    orch->bomber_model = NULL;  // Will be loaded for level 2
+    orch->bomber_skeleton = NULL;
+    orch->bomber_anim_system = NULL;  // Pointer, allocated only for level 2
     orch->collision_system = collision_system;
     orch->elapsed_time = 0.0f;
     orch->last_spawn_time = 0.0f;
     orch->active_count = 0;
     orch->wave_count = 0;
+    orch->bomber_phase = 0;
+    orch->bomber_phase_timer = 0.0f;
     
     // Load explosion model
     orch->explosion_model = t3d_model_load("rom:/explosion.t3dm");
@@ -63,15 +66,19 @@ void enemy_orchestrator_spawn_enemy(
             enemy->velocity = (T3DVec3){{vel_x, vel_y, vel_z}};
             enemy->spawn_time = orch->elapsed_time;
             
-            // Set up transform matrix
+            // Set up transform matrix (use larger scale for bomber)
             float scale[3] = {1.0f, 1.0f, 1.0f};
+            if (orch->bomber_model != NULL) {
+                scale[0] = scale[1] = scale[2] = 2.5f;  // Bomber is larger
+            }
             float rotation[3] = {0.0f, 0.0f, 0.0f};
             float position[3] = {x, y, z};
             t3d_mat4fp_from_srt_euler(enemy->matrix, scale, rotation, position);
             
-            // Extract collision boxes for this enemy (extracted at model origin)
+            // Extract collision boxes for this enemy (use bomber model if available, otherwise standard enemy)
+            T3DModel* collision_model = (orch->bomber_model != NULL) ? orch->bomber_model : orch->enemy_model;
             int collision_before = orch->collision_system->count;
-            collision_system_extract_from_model(orch->collision_system, orch->enemy_model, "ENEMY_", COLLISION_ENEMY);
+            collision_system_extract_from_model(orch->collision_system, collision_model, "ENEMY_", COLLISION_ENEMY);
             enemy->collision_start_index = collision_before;
             enemy->collision_count = orch->collision_system->count - collision_before;
             
@@ -140,7 +147,7 @@ bool enemy_orchestrator_check_hit(EnemyOrchestrator* orch, const T3DVec3* positi
                 if (enemy->system.health <= 0) {
                     enemy->system.active = false;
                     enemy->has_explosion = true;
-                    enemy->explosion_timer = 0.1f;
+                    enemy->explosion_timer = 0.25f;
                     enemy->explosion_position = enemy->position;
                     
                     debugf("*** EXPLOSION %d CREATED at (%.1f, %.1f, %.1f) timer=1.0\n", 
@@ -460,25 +467,269 @@ void enemy_orchestrator_update_level1(EnemyOrchestrator* orch, float delta_time)
 }
 
 /**
- * Level 2 enemy pattern - V-formation waves
- * 5 enemies spawn in a V pattern, every 4 seconds
+ * Level 2 enemy pattern - Single bomber with alternating attack phases
+ * Phase 0: Retreat - fly far away
+ * Phase 1: Approach - fly back in aggressively  
+ * Phase 2: Strafe - rapid fire attack run
+ * Phase 3: Transition to wave - smoothly move to wave position
+ * Phase 4: Wave pattern - side-to-side barrage
  */
 void enemy_orchestrator_update_level2(EnemyOrchestrator* orch, float delta_time) {
-    orch->elapsed_time += delta_time;
-    
-    // Spawn pattern: Wave of 5 enemies in V-formation every 4 seconds
-    if (orch->elapsed_time - orch->last_spawn_time > 4.0f) {
-        // V-formation: 2 on each side angled inward, 1 at point
-        enemy_orchestrator_spawn_enemy(orch, -100.0f, -150.0f, -450.0f, 20.0f, 0.0f, 90.0f);  // Left outer
-        enemy_orchestrator_spawn_enemy(orch, -50.0f, -120.0f, -400.0f, 10.0f, 0.0f, 85.0f);   // Left inner
-        enemy_orchestrator_spawn_enemy(orch, 0.0f, -100.0f, -380.0f, 0.0f, 0.0f, 80.0f);      // Point
-        enemy_orchestrator_spawn_enemy(orch, 50.0f, -120.0f, -400.0f, -10.0f, 0.0f, 85.0f);   // Right inner
-        enemy_orchestrator_spawn_enemy(orch, 100.0f, -150.0f, -450.0f, -20.0f, 0.0f, 90.0f);  // Right outer
-        orch->last_spawn_time = orch->elapsed_time;
+    // Load bomber model and setup animation on first call
+    if (!orch->bomber_model) {
+        orch->bomber_model = t3d_model_load("rom:/enemy2.t3dm");
+        if (!orch->bomber_model) {
+            debugf("ERROR: Failed to load enemy2.t3dm bomber model\n");
+            return;
+        }
+        
+        // Initialize skeleton and animation for bomber
+        const T3DChunkSkeleton* skelChunk = t3d_model_get_skeleton(orch->bomber_model);
+        if (skelChunk) {
+            orch->bomber_skeleton = malloc_uncached(sizeof(T3DSkeleton));
+            *orch->bomber_skeleton = t3d_skeleton_create(orch->bomber_model);
+            orch->bomber_anim_system = malloc_uncached(sizeof(AnimationSystem));
+            animation_system_init(orch->bomber_anim_system, orch->bomber_model, orch->bomber_skeleton);
+            animation_system_play(orch->bomber_anim_system, "spin", true);  // Loop spin animation
+        }
     }
     
-    // Update all active enemies (same straight movement logic)
-    enemy_orchestrator_update_common(orch, delta_time);
+    // Update bomber animation
+    if (orch->bomber_skeleton && orch->bomber_anim_system) {
+        animation_system_update(orch->bomber_anim_system, delta_time);
+    }
+    
+    orch->elapsed_time += delta_time;
+    
+    // Spawn bomber if none active
+    if (orch->active_count == 0 && orch->wave_count == 0) {
+        // Spawn bomber at distant starting position
+        enemy_orchestrator_spawn_enemy(orch, 0.0f, -20.0f, -800.0f, 0.0f, 0.0f, 0.0f);
+        if (orch->active_count > 0) {
+            EnemyInstance* bomber = &orch->enemies[0];
+            bomber->movement_phase = 0;
+            bomber->phase_timer = 0.0f;
+            // Health is already set from collision box name (ENEMY_bomber_10 = 10 health)
+            orch->bomber_phase = 0;  // Start with retreat
+            orch->bomber_phase_timer = 0.0f;
+            orch->wave_count = 1;
+        }
+    }
+    
+    // Update bomber behavior with realistic physics
+    for (int i = 0; i < MAX_ENEMIES; i++) {
+        if (!orch->enemies[i].active) continue;
+        
+        EnemyInstance* bomber = &orch->enemies[i];
+        bomber->phase_timer += delta_time;
+        orch->bomber_phase_timer += delta_time;
+        
+        switch (orch->bomber_phase) {
+            case 0: // Retreat - fly back to distant position
+            {
+                T3DVec3 retreat_target = {{0.0f, 0.0f, -1000.0f}};
+                T3DVec3 to_target = {{
+                    retreat_target.v[0] - bomber->position.v[0],
+                    retreat_target.v[1] - bomber->position.v[1],
+                    retreat_target.v[2] - bomber->position.v[2]
+                }};
+                
+                float dist = sqrtf(to_target.v[0]*to_target.v[0] + to_target.v[1]*to_target.v[1] + to_target.v[2]*to_target.v[2]);
+                
+                if (dist < 20.0f || bomber->phase_timer > 3.0f) {
+                    // Reached retreat position, prepare to charge
+                    bomber->position = retreat_target;
+                    bomber->velocity = (T3DVec3){{0.0f, 0.0f, 0.0f}};
+                    orch->bomber_phase = 1;
+                    bomber->phase_timer = 0.0f;
+                } else {
+                    // Accelerate away with easing
+                    float speed = 180.0f + (bomber->phase_timer * 60.0f);  // Accelerate from 180 to 240
+                    if (speed > 240.0f) speed = 240.0f;
+                    
+                    bomber->velocity.v[0] = (to_target.v[0] / dist) * speed;
+                    bomber->velocity.v[1] = (to_target.v[1] / dist) * speed;
+                    bomber->velocity.v[2] = (to_target.v[2] / dist) * speed;
+                    
+                    bomber->position.v[0] += bomber->velocity.v[0] * delta_time;
+                    bomber->position.v[1] += bomber->velocity.v[1] * delta_time;
+                    bomber->position.v[2] += bomber->velocity.v[2] * delta_time;
+                }
+                break;
+            }
+            
+            case 1: // Approach - charge in aggressively
+            {
+                T3DVec3 approach_target = {{0.0f, -120.0f, -250.0f}};  // Close to player zone
+                T3DVec3 to_target = {{
+                    approach_target.v[0] - bomber->position.v[0],
+                    approach_target.v[1] - bomber->position.v[1],
+                    approach_target.v[2] - bomber->position.v[2]
+                }};
+                
+                float dist = sqrtf(to_target.v[0]*to_target.v[0] + to_target.v[1]*to_target.v[1] + to_target.v[2]*to_target.v[2]);
+                
+                if (dist < 30.0f) {
+                    // Reached attack position, begin strafe
+                    orch->bomber_phase = 2;
+                    bomber->phase_timer = 0.0f;
+                } else {
+                    // Aggressive approach with realistic acceleration
+                    float progress = bomber->phase_timer / 2.5f;
+                    if (progress > 1.0f) progress = 1.0f;
+                    
+                    // Ease-in-out for smooth acceleration/deceleration
+                    float ease = progress < 0.5f ? 
+                        2.0f * progress * progress : 
+                        1.0f - powf(-2.0f * progress + 2.0f, 2.0f) / 2.0f;
+                    
+                    float speed = 280.0f * ease;  // Max 280 speed
+                    
+                    bomber->velocity.v[0] = (to_target.v[0] / dist) * speed;
+                    bomber->velocity.v[1] = (to_target.v[1] / dist) * speed;
+                    bomber->velocity.v[2] = (to_target.v[2] / dist) * speed;
+                    
+                    bomber->position.v[0] += bomber->velocity.v[0] * delta_time;
+                    bomber->position.v[1] += bomber->velocity.v[1] * delta_time;
+                    bomber->position.v[2] += bomber->velocity.v[2] * delta_time;
+                }
+                break;
+            }
+            
+            case 2: // Strafe - rapid shooting attack
+            {
+                // Strafe side-to-side while shooting
+                float strafe_speed = 120.0f;
+                float strafe_pattern = sinf(bomber->phase_timer * 3.0f);
+                
+                bomber->velocity.v[0] = strafe_pattern * strafe_speed;
+                bomber->velocity.v[1] = -15.0f * sinf(bomber->phase_timer * 2.0f);  // Slight bobbing
+                bomber->velocity.v[2] = 0.0f;
+                
+                bomber->position.v[0] += bomber->velocity.v[0] * delta_time;
+                bomber->position.v[1] += bomber->velocity.v[1] * delta_time;
+                bomber->position.v[2] += bomber->velocity.v[2] * delta_time;
+                
+                // Clamp X position to stay in view
+                if (bomber->position.v[0] < -180.0f) bomber->position.v[0] = -180.0f;
+                if (bomber->position.v[0] > 180.0f) bomber->position.v[0] = 180.0f;
+                
+                // After 4 seconds of strafing, transition to wave pattern
+                if (bomber->phase_timer >= 4.0f) {
+                    orch->bomber_phase = 3;
+                    bomber->phase_timer = 0.0f;
+                }
+                break;
+            }
+            
+            case 3: // Transition to wave pattern position
+            {
+                T3DVec3 wave_target = {{-200.0f, -40.0f, -420.0f}};
+                T3DVec3 to_target = {{
+                    wave_target.v[0] - bomber->position.v[0],
+                    wave_target.v[1] - bomber->position.v[1],
+                    wave_target.v[2] - bomber->position.v[2]
+                }};
+                
+                float dist = sqrtf(to_target.v[0]*to_target.v[0] + to_target.v[1]*to_target.v[1] + to_target.v[2]*to_target.v[2]);
+                
+                if (dist < 25.0f) {
+                    orch->bomber_phase = 4;
+                    bomber->phase_timer = 0.0f;
+                    orch->bomber_phase_timer = 0.0f;
+                } else {
+                    // Smooth transition with deceleration
+                    float speed = 160.0f * (1.0f - (bomber->phase_timer / 2.0f));
+                    if (speed < 80.0f) speed = 80.0f;
+                    
+                    bomber->velocity.v[0] = (to_target.v[0] / dist) * speed;
+                    bomber->velocity.v[1] = (to_target.v[1] / dist) * speed;
+                    bomber->velocity.v[2] = (to_target.v[2] / dist) * speed;
+                    
+                    bomber->position.v[0] += bomber->velocity.v[0] * delta_time;
+                    bomber->position.v[1] += bomber->velocity.v[1] * delta_time;
+                    bomber->position.v[2] += bomber->velocity.v[2] * delta_time;
+                }
+                break;
+            }
+            
+            case 4: // Wave pattern - side-to-side barrage
+            {
+                // Smooth sinusoidal movement
+                float wave_amplitude = 200.0f;
+                float wave_frequency = 1.5f;
+                float target_x = sinf(orch->bomber_phase_timer * wave_frequency) * wave_amplitude;
+                
+                // Smooth velocity interpolation
+                float current_x = bomber->position.v[0];
+                float x_diff = target_x - current_x;
+                bomber->velocity.v[0] = x_diff * 3.0f;  // Smooth tracking
+                
+                bomber->position.v[0] += bomber->velocity.v[0] * delta_time;
+                bomber->position.v[1] = -40.0f + sinf(orch->bomber_phase_timer * 0.8f) * 15.0f;  // Gentle bobbing
+                bomber->position.v[2] = -420.0f;
+                
+                // After 7 seconds, cycle back to retreat
+                if (bomber->phase_timer >= 7.0f) {
+                    orch->bomber_phase = 0;
+                    bomber->phase_timer = 0.0f;
+                    orch->bomber_phase_timer = 0.0f;
+                }
+                break;
+            }
+        }
+        
+        // Update transform matrix with animation bones
+        float scale[3] = {2.5f, 2.5f, 2.5f};  // Bomber is larger
+        float rotation[3] = {0.0f, 0.0f, 0.0f};  // Face player
+        float position[3] = {bomber->position.v[0], bomber->position.v[1], bomber->position.v[2]};
+        t3d_mat4fp_from_srt_euler(bomber->matrix, scale, rotation, position);
+        
+        // Update collision boxes
+        collision_system_update_boxes_by_range(orch->collision_system, 
+                                               bomber->collision_start_index, 
+                                               bomber->collision_count, 
+                                               bomber->matrix);
+        
+        // Update hit timer
+        if (bomber->hit_timer > 0.0f) {
+            bomber->hit_timer -= delta_time;
+            if (bomber->hit_timer <= 0.0f) bomber->show_hit = false;
+        }
+        
+        // Update flash timer
+        if (bomber->system.flash_timer > 0.0f) {
+            bomber->system.flash_timer -= delta_time;
+            if (bomber->system.flash_timer < 0.0f) bomber->system.flash_timer = 0.0f;
+        }
+        
+        // Deactivate if destroyed
+        if (!enemy_system_is_active(&bomber->system)) {
+            for (int j = bomber->collision_start_index; j < bomber->collision_start_index + bomber->collision_count; j++) {
+                if (j < orch->collision_system->count) {
+                    orch->collision_system->boxes[j].active = false;
+                }
+            }
+            bomber->active = false;
+            orch->active_count--;
+        }
+    }
+    
+    // Update explosions
+    for (int i = 0; i < MAX_ENEMIES; i++) {
+        if (orch->enemies[i].has_explosion) {
+            EnemyInstance* enemy = &orch->enemies[i];
+            enemy->explosion_timer -= delta_time;
+            
+            if (enemy->explosion_timer <= 0.0f) {
+                enemy->has_explosion = false;
+                float far_scale[3] = {0.0f, 0.0f, 0.0f};
+                float far_rotation[3] = {0.0f, 0.0f, 0.0f};
+                float far_position[3] = {0.0f, -10000.0f, 0.0f};
+                t3d_mat4fp_from_srt_euler(orch->explosion_matrices[i], far_scale, far_rotation, far_position);
+            }
+        }
+    }
 }
 
 /**
@@ -488,15 +739,16 @@ void enemy_orchestrator_update_level2(EnemyOrchestrator* orch, float delta_time)
 void enemy_orchestrator_update_level3(EnemyOrchestrator* orch, float delta_time) {
     orch->elapsed_time += delta_time;
     
-    // Spawn pattern: Single enemy every 1.5 seconds from alternating sides
-    if (orch->elapsed_time - orch->last_spawn_time > 1.5f) {
-        // Alternate sides based on spawn count
-        bool from_left = ((int)(orch->elapsed_time / 1.5f) % 2) == 0;
+    // Spawn 15 enemies total, one at a time every 2 seconds, alternating from left and right
+    if (orch->wave_count < 15 && orch->elapsed_time - orch->last_spawn_time > 2.0f) {
+        // Alternate sides based on wave count
+        bool from_left = (orch->wave_count % 2) == 0;
         float start_x = from_left ? -150.0f : 150.0f;
         float vel_x = from_left ? 40.0f : -40.0f;  // Move across screen
         
         enemy_orchestrator_spawn_enemy(orch, start_x, -100.0f, -400.0f, vel_x, 0.0f, 60.0f);
         orch->last_spawn_time = orch->elapsed_time;
+        orch->wave_count++;
     }
     
     // Update all active enemies with zigzag motion
@@ -562,79 +814,6 @@ void enemy_orchestrator_update_level3(EnemyOrchestrator* orch, float delta_time)
             debugf("Enemy %d destroyed\n", i);
         }
     }
-}
-
-/**
- * Common enemy update logic (used by level 1 and 2)
- * Updates position, collision, timers for straight-moving enemies
- */
-static void enemy_orchestrator_update_common(EnemyOrchestrator* orch, float delta_time) {
-    for (int i = 0; i < MAX_ENEMIES; i++) {
-        if (!orch->enemies[i].active) continue;
-        
-        EnemyInstance* enemy = &orch->enemies[i];
-        
-        // Update position based on velocity
-        enemy->position.v[0] += enemy->velocity.v[0] * delta_time;
-        enemy->position.v[1] += enemy->velocity.v[1] * delta_time;
-        enemy->position.v[2] += enemy->velocity.v[2] * delta_time;
-        
-        // Update transform matrix
-        float scale[3] = {1.0f, 1.0f, 1.0f};
-        float rotation[3] = {0.0f, 0.0f, 0.0f};
-        float position[3] = {enemy->position.v[0], enemy->position.v[1], enemy->position.v[2]};
-        t3d_mat4fp_from_srt_euler(enemy->matrix, scale, rotation, position);
-        
-        // Update collision boxes for THIS specific enemy only
-        collision_system_update_boxes_by_range(orch->collision_system, 
-                                               enemy->collision_start_index, 
-                                               enemy->collision_count, 
-                                               enemy->matrix);
-        
-        // Update hit timer
-        if (enemy->hit_timer > 0.0f) {
-            enemy->hit_timer -= delta_time;
-            if (enemy->hit_timer <= 0.0f) {
-                enemy->show_hit = false;
-            }
-        }
-        
-        // Update flash timer
-        if (enemy->system.flash_timer > 0.0f) {
-            enemy->system.flash_timer -= delta_time;
-            if (enemy->system.flash_timer < 0.0f) {
-                enemy->system.flash_timer = 0.0f;
-            }
-        }
-        
-        // Deactivate if moved past player (z > 100)
-        if (enemy->position.v[2] > 100.0f) {
-            // Remove collision boxes for this enemy
-            for (int j = enemy->collision_start_index; j < enemy->collision_start_index + enemy->collision_count; j++) {
-                if (j < orch->collision_system->count) {
-                    orch->collision_system->boxes[j].active = false;
-                }
-            }
-            
-            enemy->active = false;
-            orch->active_count--;
-            debugf("Enemy %d moved past player, deactivated\n", i);
-        }
-        
-        // Deactivate if destroyed
-        if (!enemy_system_is_active(&enemy->system)) {
-            // Remove collision boxes for this enemy
-            for (int j = enemy->collision_start_index; j < enemy->collision_start_index + enemy->collision_count; j++) {
-                if (j < orch->collision_system->count) {
-                    orch->collision_system->boxes[j].active = false;
-                }
-            }
-            
-            enemy->active = false;
-            orch->active_count--;
-            debugf("Enemy %d destroyed\n", i);
-        }
-    }
     
     // Update explosions
     for (int i = 0; i < MAX_ENEMIES; i++) {
@@ -685,6 +864,23 @@ void enemy_orchestrator_cleanup(EnemyOrchestrator* orch) {
         orch->explosion_model = NULL;
     }
     
+    // Free bomber model and skeleton
+    if (orch->bomber_model) {
+        t3d_model_free(orch->bomber_model);
+        orch->bomber_model = NULL;
+    }
+    
+    if (orch->bomber_anim_system) {
+        free_uncached(orch->bomber_anim_system);
+        orch->bomber_anim_system = NULL;
+    }
+    
+    if (orch->bomber_skeleton) {
+        t3d_skeleton_destroy(orch->bomber_skeleton);
+        free_uncached(orch->bomber_skeleton);
+        orch->bomber_skeleton = NULL;
+    }
+    
     // Free explosion matrices
     if (orch->explosion_matrices) {
         for (int i = 0; i < MAX_ENEMIES; i++) {
@@ -712,8 +908,6 @@ void enemy_orchestrator_cleanup(EnemyOrchestrator* orch) {
 void enemy_orchestrator_spawn_projectiles_level1(EnemyOrchestrator* orch, void* projectile_system_ptr, float delta_time) {
     if (!orch || !projectile_system_ptr) return;
     
-    // Include projectile system header for spawning
-    #include "projectilesystem.h"
     ProjectileSystem* ps = (ProjectileSystem*)projectile_system_ptr;
     
     for (int i = 0; i < MAX_ENEMIES; i++) {
@@ -737,6 +931,87 @@ void enemy_orchestrator_spawn_projectiles_level1(EnemyOrchestrator* orch, void* 
                 
                 projectile_system_spawn(ps, spawn_pos, shoot_direction, PROJECTILE_ENEMY);
             }
+        }
+    }
+}
+
+void enemy_orchestrator_spawn_projectiles_level2(EnemyOrchestrator* orch, void* projectile_system_ptr, float delta_time) {
+    if (!orch || !projectile_system_ptr) return;
+    
+    ProjectileSystem* ps = (ProjectileSystem*)projectile_system_ptr;
+    
+    for (int i = 0; i < MAX_ENEMIES; i++) {
+        if (!orch->enemies[i].active) continue;
+        
+        EnemyInstance* bomber = &orch->enemies[i];
+        bomber->shoot_timer += delta_time;
+        
+        // Phase 2: Strafe attack - rapid fire from 4 locations
+        if (orch->bomber_phase == 2) {
+            if (bomber->shoot_timer >= 0.15f) {  // Very rapid fire during strafe
+                bomber->shoot_timer = 0.0f;
+                
+                T3DVec3 shoot_dir = {{0.0f, 0.0f, 1.0f}};  // Forward
+                
+                // 4 spawn positions: front, left wing, right wing, rear
+                T3DVec3 positions[4] = {
+                    {{bomber->position.v[0], bomber->position.v[1] - 10.0f, bomber->position.v[2] + 60.0f}},   // Front turret
+                    {{bomber->position.v[0] - 90.0f, bomber->position.v[1] - 5.0f, bomber->position.v[2] + 20.0f}},  // Left wing
+                    {{bomber->position.v[0] + 90.0f, bomber->position.v[1] - 5.0f, bomber->position.v[2] + 20.0f}},  // Right wing
+                    {{bomber->position.v[0], bomber->position.v[1] + 5.0f, bomber->position.v[2] - 40.0f}}     // Rear turret
+                };
+                
+                // Cycle through positions
+                int pos_index = ((int)(orch->elapsed_time * 6.67f)) % 4;
+                projectile_system_spawn(ps, positions[pos_index], shoot_dir, PROJECTILE_ENEMY);
+            }
+        }
+        // Phase 4: Wave pattern - spread barrage
+        else if (orch->bomber_phase == 4) {
+            if (bomber->shoot_timer >= 0.4f) {  // Shoot waves every 0.4 seconds
+                bomber->shoot_timer = 0.0f;
+                
+                // Spawn 7 projectiles in a wave pattern
+                for (int j = -3; j <= 3; j++) {
+                    T3DVec3 spawn_pos = {{
+                        bomber->position.v[0] + j * 45.0f,
+                        bomber->position.v[1] - 15.0f,
+                        bomber->position.v[2] + 30.0f
+                    }};
+                    
+                    // Angled shots creating wave spread
+                    float angle = j * 0.15f;  // Spread pattern
+                    T3DVec3 shoot_dir = {{sinf(angle), 0.0f, cosf(angle)}};
+                    
+                    projectile_system_spawn(ps, spawn_pos, shoot_dir, PROJECTILE_ENEMY);
+                }
+            }
+        }
+    }
+}
+
+void enemy_orchestrator_spawn_projectiles_level3(EnemyOrchestrator* orch, void* projectile_system_ptr, float delta_time) {
+    if (!orch || !projectile_system_ptr) return;
+    
+    ProjectileSystem* ps = (ProjectileSystem*)projectile_system_ptr;
+    
+    for (int i = 0; i < MAX_ENEMIES; i++) {
+        if (!orch->enemies[i].active) continue;
+        
+        EnemyInstance* enemy = &orch->enemies[i];
+        enemy->shoot_timer += delta_time;
+        
+        // Shoot every 1.5 seconds
+        if (enemy->shoot_timer >= 1.5f) {
+            enemy->shoot_timer = 0.0f;
+            
+            // Spawn projectile at enemy position
+            T3DVec3 spawn_pos = enemy->position;
+            
+            // Shoot towards player
+            T3DVec3 shoot_direction = {{0.0f, 0.0f, 1.0f}};
+            
+            projectile_system_spawn(ps, spawn_pos, shoot_direction, PROJECTILE_ENEMY);
         }
     }
 }

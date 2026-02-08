@@ -73,7 +73,7 @@ void level2_init(Level2* level, rdpq_font_t* font) {
     t3d_mat4fp_from_srt_euler(level->enemyMat, enemy_scale, enemy_rotation, enemy_position);
     
     // Initialize player controls with boundaries
-    T3DVec3 start_pos = {{0.0f, -150.0f, 0.0f}};
+    T3DVec3 start_pos = {{0.0f, -200.0f, 0.0f}};
     PlayerBoundary boundary = {
         .min_x = -150.0f,
         .max_x = 150.0f,
@@ -153,6 +153,7 @@ int level2_update(Level2* level) {
         animation_system_update(&level->mars_anim_system, delta_time);
     }
     
+    joypad_buttons_t btn = joypad_get_buttons_pressed(JOYPAD_PORT_1);
     joypad_buttons_t btn_held = joypad_get_buttons_held(JOYPAD_PORT_1);
     joypad_inputs_t inputs = joypad_get_inputs(JOYPAD_PORT_1);
     
@@ -179,8 +180,8 @@ int level2_update(Level2* level) {
         goto skip_to_camera;
     }
     
-    // Check for victory condition
-    if (!level->victory && enemy_orchestrator_all_waves_complete(&level->enemy_orchestrator, 5)) {
+    // Check for victory condition (bomber destroyed)
+    if (!level->victory && level->enemy_orchestrator.wave_count > 0 && level->enemy_orchestrator.active_count == 0) {
         level->victory = true;
         level->victory_timer = 0.0f;
         
@@ -188,15 +189,18 @@ int level2_update(Level2* level) {
         float center_x = (level->player_controls.boundary.min_x + level->player_controls.boundary.max_x) / 2.0f;
         T3DVec3 center_pos = {{center_x, level->player_controls.position.v[1], level->player_controls.position.v[2]}};
         playercontrols_set_position(&level->player_controls, center_pos);
-        
-        // Play Boost animation
-        animation_system_play(&level->anim_system, "Boost", false);
     }
     
     // Update victory timer and advance to next level
     if (level->victory) {
         level->victory_timer += delta_time;
-        if (level->victory_timer >= 3.0f) {
+        
+        // Play Boost animation after 3 second wait
+        if (level->victory_timer >= 3.0f && level->victory_timer < 3.0f + delta_time) {
+            animation_system_play(&level->anim_system, "Boost", false);
+        }
+        
+        if (level->victory_timer >= 6.0f) {
             return LEVEL_3;
         }
         // Skip rest of update during victory
@@ -232,27 +236,43 @@ int level2_update(Level2* level) {
     // Update enemy orchestrator (handles spawning, movement, and individual enemy systems)
     enemy_orchestrator_update_level2(&level->enemy_orchestrator, delta_time);
     
-    // Manual projectile collision checking with each enemy
-    for (int p = 0; p < MAX_PROJECTILES; p++) {
-        Projectile* proj = projectile_system_get_projectile(&level->projectile_system, p);
-        if (proj && proj->active) {
-            T3DVec3 proj_pos = proj->position;
-            int enemy_index = -1;
-            int damage = (proj->type == PROJECTILE_SLASH) ? 3 : 1;
-            
-            // Check if projectile hits any enemy
-            if (enemy_orchestrator_check_hit(&level->enemy_orchestrator, &proj_pos, &enemy_index, damage)) {
-                // Hit detected, deactivate projectile
-                projectile_system_deactivate(&level->projectile_system, p);
-            }
-        }
-    }
-    
-    // Update projectile system (movement and rendering)
-    projectile_system_update(&level->projectile_system, delta_time);
+    // Spawn enemy projectiles from bomber
+    enemy_orchestrator_spawn_projectiles_level2(&level->enemy_orchestrator, &level->projectile_system, delta_time);
     
     // Update title animation
     title_animation_update(&level->title_anim, delta_time);
+    
+    // Update collision boxes to match current player position
+    collision_system_update_boxes_by_type(&level->collision_system, COLLISION_PLAYER, level->modelMat);
+    
+    // Update projectiles (movement only, no collision yet)
+    projectile_system_update(&level->projectile_system, delta_time);
+    
+    // Manual collision checking for projectiles
+    for (int i = 0; i < MAX_PROJECTILES; i++) {
+        Projectile* proj = projectile_system_get_projectile(&level->projectile_system, i);
+        if (!proj || !proj->active) continue;
+        
+        if (proj->is_enemy) {
+            // Enemy projectile - check collision with player
+            char hit_name[64];
+            if (!player_health_is_dead(&level->player_health) && 
+                collision_system_check_point(&level->collision_system, &proj->position, COLLISION_PLAYER, hit_name)) {
+                player_health_take_damage(&level->player_health, 1);
+                projectile_system_deactivate(&level->projectile_system, i);
+            }
+        } else {
+            // Player projectile - check collision with enemies
+            int hit_enemy_index = -1;
+            if (enemy_orchestrator_check_hit(&level->enemy_orchestrator, &proj->position, &hit_enemy_index, proj->damage)) {
+                projectile_system_deactivate(&level->projectile_system, i);
+            }
+        }
+    }
+
+skip_to_camera:
+    // Update player position for rendering
+    player_pos = playercontrols_get_position(&level->player_controls);
     
     // A button - shoot slash projectile (hold for continuous fire)
     if (btn_held.a && projectile_system_can_shoot(&level->projectile_system, PROJECTILE_SLASH)) {
@@ -274,12 +294,10 @@ int level2_update(Level2* level) {
         projectile_system_spawn(&level->projectile_system, spawn_pos, shoot_direction, PROJECTILE_NORMAL);
     }
     
-skip_to_camera:
-    // Update player position for rendering
-    player_pos = playercontrols_get_position(&level->player_controls);
-    
-    // if (btn.start) return LEVEL_3;
-    // if (btn.b) return LEVEL_1;
+    if (btn.start){
+        return LEVEL_3;  
+    } 
+
     
     // Set up camera
     const T3DVec3 camPos = {{0, 0.0f, 200.0f}};
@@ -320,7 +338,10 @@ void level2_render(Level2* level) {
         t3d_matrix_pop(1);
     }
     
-    // Draw all active enemies from orchestrator
+    // Draw all active enemies from orchestrator (using bomber model for level 2)
+    T3DModel* model_to_draw = level->enemy_orchestrator.bomber_model ? level->enemy_orchestrator.bomber_model : level->enemy_model;
+    T3DSkeleton* skeleton_to_use = level->enemy_orchestrator.bomber_skeleton;
+    
     for (int i = 0; i < MAX_ENEMIES; i++) {
         if (!enemy_orchestrator_is_active(&level->enemy_orchestrator, i)) continue;
         
@@ -342,10 +363,10 @@ void level2_render(Level2* level) {
                 .tileCb = NULL,
                 .filterCb = NULL,
                 .dynTextureCb = NULL,
-                .matrices = NULL
+                .matrices = skeleton_to_use ? skeleton_to_use->boneMatricesFP : NULL  // Use bomber animation
             };
             
-            t3d_model_draw_custom(level->enemy_model, enemyDrawConf);
+            t3d_model_draw_custom(model_to_draw, enemyDrawConf);
             
             t3d_matrix_pop(1);
             

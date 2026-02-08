@@ -18,7 +18,6 @@ SRC = $(SRC_DIR)/main.c \
       $(SRC_DIR)/playercontrols.c \
       $(SRC_DIR)/outfitsystem.c \
       $(SRC_DIR)/projectilesystem.c \
-			$(SRC_DIR)/enemyprojectilesystem.c \
       $(SRC_DIR)/collisionsystem.c \
       $(SRC_DIR)/enemysystem.c \
       $(SRC_DIR)/enemyorchestrator.c \

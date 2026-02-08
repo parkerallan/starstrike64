@@ -153,7 +153,7 @@ int level3_update(Level3* level) {
         animation_system_update(&level->jupiter_anim_system, delta_time);
     }
     
-    joypad_buttons_t btn = joypad_get_buttons_pressed(JOYPAD_PORT_1);
+    //joypad_buttons_t btn = joypad_get_buttons_pressed(JOYPAD_PORT_1);
     joypad_buttons_t btn_held = joypad_get_buttons_held(JOYPAD_PORT_1);
     joypad_inputs_t inputs = joypad_get_inputs(JOYPAD_PORT_1);
     
@@ -291,9 +291,9 @@ skip_to_camera:
     // Update player position for rendering
     player_pos = playercontrols_get_position(&level->player_controls);
     
-    if (btn.start){
-        return LEVEL_4; 
-    }
+    // if (btn.start){
+    //     return LEVEL_4; 
+    // }
     
     // Set up camera
     const T3DVec3 camPos = {{0, 0.0f, 200.0f}};
@@ -474,6 +474,7 @@ void level3_cleanup(Level3* level) {
     
     collision_system_cleanup(&level->collision_system);
     
+    mixer_ch_stop(0);
     wav64_close(&level->music);
     rdpq_text_unregister_font(1);
 }

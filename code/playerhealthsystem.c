@@ -91,8 +91,8 @@ void player_health_render(PlayerHealthSystem* system) {
             rdpq_sprite_blit(system->health_sprite, start_x + (i * spacing), 10, &params);
         }
     } else if (system->is_dead) {
-        // Draw DESTROYED in center of screen
-        rdpq_text_printf(NULL, 1, 115, 110, "DESTROYED");
+        // Draw DESTROYED in center of screen (320x240 screen, centered at ~160x120)
+        rdpq_text_printf(NULL, 1, 125, 110, "DESTROYED");
     }
 }
 

@@ -56,6 +56,17 @@ typedef struct {
     bool boss_moving_right;
     float boss_barrage_cooldown;
     float boss_spin_timer;
+    
+    // Level 5 boss state
+    T3DModel* level5_boss_model;
+    T3DSkeleton* level5_boss_skeleton;
+    AnimationSystem level5_boss_anim;
+    float level5_boss_sine_timer;  // Timer for sine wave movement
+    int level5_boss_phase;  // 0=phase1 (MachineGun), 1=phase2 (Cannon)
+    float level5_boss_attack_timer;  // Timer for attacks
+    float level5_boss_curve_offset;  // Offset for curving projectiles
+    bool level5_boss_curve_right;  // Direction of curve
+    int level5_boss_cannon_shots;  // Count for cannon phase (2 shots)
 } EnemyOrchestrator;
 
 // Initialize orchestrator
@@ -122,5 +133,11 @@ void enemy_orchestrator_init_level4_boss(EnemyOrchestrator* orch, CollisionSyste
 void enemy_orchestrator_update_level4_boss(EnemyOrchestrator* orch, float delta_time, void* projectile_system);
 T3DModel* enemy_orchestrator_get_boss_model(EnemyOrchestrator* orch);
 T3DSkeleton* enemy_orchestrator_get_boss_skeleton(EnemyOrchestrator* orch);
+
+// Level 5 Boss functions
+void enemy_orchestrator_init_level5_boss(EnemyOrchestrator* orch, CollisionSystem* collision_system);
+void enemy_orchestrator_update_level5_boss(EnemyOrchestrator* orch, float delta_time, void* projectile_system);
+T3DModel* enemy_orchestrator_get_level5_boss_model(EnemyOrchestrator* orch);
+T3DSkeleton* enemy_orchestrator_get_level5_boss_skeleton(EnemyOrchestrator* orch);
 
 #endif // ENEMYORCHESTRATOR_H

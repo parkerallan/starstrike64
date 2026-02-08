@@ -153,7 +153,7 @@ int level2_update(Level2* level) {
         animation_system_update(&level->mars_anim_system, delta_time);
     }
     
-    joypad_buttons_t btn = joypad_get_buttons_pressed(JOYPAD_PORT_1);
+    //joypad_buttons_t btn = joypad_get_buttons_pressed(JOYPAD_PORT_1);
     joypad_buttons_t btn_held = joypad_get_buttons_held(JOYPAD_PORT_1);
     joypad_inputs_t inputs = joypad_get_inputs(JOYPAD_PORT_1);
     
@@ -294,10 +294,9 @@ skip_to_camera:
         projectile_system_spawn(&level->projectile_system, spawn_pos, shoot_direction, PROJECTILE_NORMAL);
     }
     
-    if (btn.start){
-        return LEVEL_3;  
-    } 
-
+    // if (btn.start){
+    //     return LEVEL_3;  
+    // } 
     
     // Set up camera
     const T3DVec3 camPos = {{0, 0.0f, 200.0f}};
@@ -481,6 +480,7 @@ void level2_cleanup(Level2* level) {
     
     collision_system_cleanup(&level->collision_system);
     
+    mixer_ch_stop(0);
     wav64_close(&level->music);
     rdpq_text_unregister_font(1);
 }

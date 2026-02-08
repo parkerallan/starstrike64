@@ -100,8 +100,8 @@ void level5_init(Level5* level, rdpq_font_t* font) {
     // Extract collision boxes from player model
     collision_system_extract_from_model(&level->collision_system, level->mecha_model, "PLAYER_", COLLISION_PLAYER);
     
-    // Initialize enemy orchestrator
-    enemy_orchestrator_init(&level->enemy_orchestrator, level->enemy_model, &level->collision_system);
+    // Initialize Level 5 boss
+    enemy_orchestrator_init_level5_boss(&level->enemy_orchestrator, &level->collision_system);
     
     debugf("Collision system initialized with %d boxes\n", level->collision_system.count);
     
@@ -153,6 +153,7 @@ int level5_update(Level5* level) {
         animation_system_update(&level->mercury_anim_system, delta_time);
     }
     
+    //joypad_buttons_t btn = joypad_get_buttons_pressed(JOYPAD_PORT_1);
     joypad_buttons_t btn_held = joypad_get_buttons_held(JOYPAD_PORT_1);
     joypad_inputs_t inputs = joypad_get_inputs(JOYPAD_PORT_1);
     
@@ -179,8 +180,8 @@ int level5_update(Level5* level) {
         goto skip_to_camera;
     }
     
-    // Check for victory condition (level 5 loops back to level 1)
-    if (!level->victory && enemy_orchestrator_all_waves_complete(&level->enemy_orchestrator, 5)) {
+    // Check for victory condition - boss defeated
+    if (!level->victory && level->enemy_orchestrator.active_count == 0) {
         level->victory = true;
         level->victory_timer = 0.0f;
         
@@ -229,27 +230,36 @@ int level5_update(Level5* level) {
     // Update outfit system
     outfit_system_update(&level->outfit_system, delta_time);
     
-    // Update enemy orchestrator (handles spawning, movement, and individual enemy systems)
-    enemy_orchestrator_update_level3(&level->enemy_orchestrator, delta_time);
+    // Update Level 5 boss
+    enemy_orchestrator_update_level5_boss(&level->enemy_orchestrator, delta_time, &level->projectile_system);
     
-    // Manual projectile collision checking with each enemy
-    for (int p = 0; p < MAX_PROJECTILES; p++) {
-        Projectile* proj = projectile_system_get_projectile(&level->projectile_system, p);
-        if (proj && proj->active) {
-            T3DVec3 proj_pos = proj->position;
-            int enemy_index = -1;
-            int damage = (proj->type == PROJECTILE_SLASH) ? 3 : 1;
-            
-            // Check if projectile hits any enemy
-            if (enemy_orchestrator_check_hit(&level->enemy_orchestrator, &proj_pos, &enemy_index, damage)) {
-                // Hit detected, deactivate projectile
-                projectile_system_deactivate(&level->projectile_system, p);
-            }
-        }
-    }
+    // Update collision boxes to match current player position
+    collision_system_update_boxes_by_type(&level->collision_system, COLLISION_PLAYER, level->modelMat);
     
     // Update projectile system (movement and rendering)
     projectile_system_update(&level->projectile_system, delta_time);
+    
+    // Manual collision checking for projectiles
+    for (int i = 0; i < MAX_PROJECTILES; i++) {
+        Projectile* proj = projectile_system_get_projectile(&level->projectile_system, i);
+        if (!proj || !proj->active) continue;
+        
+        if (proj->is_enemy) {
+            // Enemy projectile - check collision with player
+            char hit_name[64];
+            if (!player_health_is_dead(&level->player_health) && 
+                collision_system_check_point(&level->collision_system, &proj->position, COLLISION_PLAYER, hit_name)) {
+                player_health_take_damage(&level->player_health, 1);
+                projectile_system_deactivate(&level->projectile_system, i);
+            }
+        } else {
+            // Player projectile - check collision with boss
+            int hit_enemy_index = -1;
+            if (enemy_orchestrator_check_hit(&level->enemy_orchestrator, &proj->position, &hit_enemy_index, proj->damage)) {
+                projectile_system_deactivate(&level->projectile_system, i);
+            }
+        }
+    }
     
     // Update title animation
     title_animation_update(&level->title_anim, delta_time);
@@ -278,8 +288,10 @@ skip_to_camera:
     // Update player position for rendering
     player_pos = playercontrols_get_position(&level->player_controls);
     
-    // if (btn.start) return LEVEL_1;  // Loop back to level 1
-    // if (btn.b) return LEVEL_4;
+    // if (btn.start) 
+    // {
+    //     return SCENE_END;
+    // }
     
     // Set up camera
     const T3DVec3 camPos = {{0, 0.0f, 200.0f}};
@@ -320,14 +332,16 @@ void level5_render(Level5* level) {
         t3d_matrix_pop(1);
     }
     
-    // Draw all active enemies from orchestrator
+    // Draw Level 5 boss
     for (int i = 0; i < MAX_ENEMIES; i++) {
         if (!enemy_orchestrator_is_active(&level->enemy_orchestrator, i)) continue;
         
         EnemySystem* enemy_sys = enemy_orchestrator_get_system(&level->enemy_orchestrator, i);
         T3DMat4FP* enemy_mat = enemy_orchestrator_get_matrix(&level->enemy_orchestrator, i);
+        T3DModel* boss_model = enemy_orchestrator_get_level5_boss_model(&level->enemy_orchestrator);
+        T3DSkeleton* boss_skeleton = enemy_orchestrator_get_level5_boss_skeleton(&level->enemy_orchestrator);
         
-        if (enemy_sys && enemy_mat) {
+        if (enemy_sys && enemy_mat && boss_model) {
             // Apply red lighting if flashing
             if (enemy_system_is_flashing(enemy_sys)) {
                 uint8_t flashColor[4] = {255, 80, 80, 0xFF};
@@ -342,10 +356,10 @@ void level5_render(Level5* level) {
                 .tileCb = NULL,
                 .filterCb = NULL,
                 .dynTextureCb = NULL,
-                .matrices = NULL
+                .matrices = boss_skeleton ? boss_skeleton->boneMatricesFP : NULL
             };
             
-            t3d_model_draw_custom(level->enemy_model, enemyDrawConf);
+            t3d_model_draw_custom(boss_model, enemyDrawConf);
             
             t3d_matrix_pop(1);
             
@@ -460,6 +474,7 @@ void level5_cleanup(Level5* level) {
     
     collision_system_cleanup(&level->collision_system);
     
+    mixer_ch_stop(0);
     wav64_close(&level->music);
     rdpq_text_unregister_font(1);
 }

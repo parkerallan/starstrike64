@@ -1,6 +1,7 @@
 #include <libdragon.h>
 #include <t3d/t3d.h>
 #include "scenes.h"
+#include "startup.h"
 #include "intro.h"
 #include "level1.h"
 #include "level2.h"
@@ -10,6 +11,7 @@
 #include "end.h"
 
 // Scene instances
+SceneStartup scene_startup;
 SceneIntro scene_intro;
 Level1 level1;
 Level2 level2;
@@ -21,10 +23,10 @@ SceneEnd scene_end;
 // Global builtin font (loaded once, reused by all scenes)
 rdpq_font_t* builtin_font;
 
-// Debug: Set starting scene (0 = INTRO, 1-5 = LEVEL_1 through LEVEL_5, 6 = END)
-#define START_SCENE 1
+// Debug: Set starting scene (0 = STARTUP, 1 = INTRO, 2-6 = LEVEL_1 through LEVEL_5, 7 = END)
+#define START_SCENE 0
 
-GameScene current_scene = SCENE_INTRO;
+GameScene current_scene = SCENE_STARTUP;
 
 int main() {
     // Initialize libdragon
@@ -53,24 +55,27 @@ int main() {
 
     // Initialize starting scene based on debug define
     #if START_SCENE == 0
+        startup_init(&scene_startup, builtin_font);
+        current_scene = SCENE_STARTUP;
+    #elif START_SCENE == 1
         intro_init(&scene_intro, builtin_font);
         current_scene = SCENE_INTRO;
-    #elif START_SCENE == 1
+    #elif START_SCENE == 2
         level1_init(&level1, builtin_font);
         current_scene = LEVEL_1;
-    #elif START_SCENE == 2
+    #elif START_SCENE == 3
         level2_init(&level2, builtin_font);
         current_scene = LEVEL_2;
-    #elif START_SCENE == 3
+    #elif START_SCENE == 4
         level3_init(&level3, builtin_font);
         current_scene = LEVEL_3;
-    #elif START_SCENE == 4
+    #elif START_SCENE == 5
         level4_init(&level4, builtin_font);
         current_scene = LEVEL_4;
-    #elif START_SCENE == 5
+    #elif START_SCENE == 6
         level5_init(&level5, builtin_font);
         current_scene = LEVEL_5;
-    #elif START_SCENE == 6
+    #elif START_SCENE == 7
         end_init(&scene_end, builtin_font);
         current_scene = SCENE_END;
     #else
@@ -84,6 +89,9 @@ int main() {
         // Handle scene updates and transitions
         int transition_result = -1;
         switch (current_scene) {
+            case SCENE_STARTUP:
+                transition_result = startup_update(&scene_startup);
+                break;
             case SCENE_INTRO:
                 transition_result = intro_update(&scene_intro);
                 break;
@@ -113,6 +121,9 @@ int main() {
         if (transition_result >= 0) {
             // Cleanup current scene
             switch (current_scene) {
+                case SCENE_STARTUP:
+                    startup_cleanup(&scene_startup);
+                    break;
                 case SCENE_INTRO:
                     intro_cleanup(&scene_intro);
                     break;
@@ -140,6 +151,9 @@ int main() {
             
             // Initialize new scene
             switch (transition_result) {
+                case SCENE_STARTUP:
+                    startup_init(&scene_startup, builtin_font);
+                    break;
                 case SCENE_INTRO:
                     intro_init(&scene_intro, builtin_font);
                     break;
@@ -173,6 +187,9 @@ int main() {
         
         // Render current scene
         switch (current_scene) {
+            case SCENE_STARTUP:
+                startup_render(&scene_startup);
+                break;
             case SCENE_INTRO:
                 intro_render(&scene_intro);
                 break;
@@ -201,6 +218,9 @@ int main() {
 
     // Cleanup current scene
     switch (current_scene) {
+        case SCENE_STARTUP:
+            startup_cleanup(&scene_startup);
+            break;
         case SCENE_INTRO:
             intro_cleanup(&scene_intro);
             break;

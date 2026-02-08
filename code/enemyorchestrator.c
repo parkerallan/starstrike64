@@ -739,8 +739,8 @@ void enemy_orchestrator_update_level2(EnemyOrchestrator* orch, float delta_time)
 void enemy_orchestrator_update_level3(EnemyOrchestrator* orch, float delta_time) {
     orch->elapsed_time += delta_time;
     
-    // Spawn 15 enemies total, one at a time every 2 seconds, alternating from left and right
-    if (orch->wave_count < 15 && orch->elapsed_time - orch->last_spawn_time > 2.0f) {
+    // Spawn 15 enemies total, one at a time every 1.2 seconds, alternating from left and right
+    if (orch->wave_count < 15 && orch->elapsed_time - orch->last_spawn_time > 1.2f) {
         // Alternate sides based on wave count
         bool from_left = (orch->wave_count % 2) == 0;
         float start_x = from_left ? -150.0f : 150.0f;
@@ -1001,8 +1001,8 @@ void enemy_orchestrator_spawn_projectiles_level3(EnemyOrchestrator* orch, void* 
         EnemyInstance* enemy = &orch->enemies[i];
         enemy->shoot_timer += delta_time;
         
-        // Shoot every 1.5 seconds
-        if (enemy->shoot_timer >= 1.5f) {
+        // Shoot every 0.8 seconds
+        if (enemy->shoot_timer >= 0.8f) {
             enemy->shoot_timer = 0.0f;
             
             // Spawn projectile at enemy position
@@ -1299,4 +1299,256 @@ T3DModel* enemy_orchestrator_get_boss_model(EnemyOrchestrator* orch) {
 
 T3DSkeleton* enemy_orchestrator_get_boss_skeleton(EnemyOrchestrator* orch) {
     return orch->boss_skeleton;
+}
+
+// Level 5 Boss Functions
+
+void enemy_orchestrator_init_level5_boss(EnemyOrchestrator* orch, CollisionSystem* collision_system) {
+    orch->enemy_model = NULL;
+    orch->bomber_model = NULL;
+    orch->bomber_skeleton = NULL;
+    orch->bomber_anim_system = NULL;
+    orch->collision_system = collision_system;
+    orch->elapsed_time = 0.0f;
+    orch->last_spawn_time = 0.0f;
+    orch->active_count = 0;
+    orch->wave_count = 0;
+    
+    // Load explosion model
+    orch->explosion_model = t3d_model_load("rom:/explosion.t3dm");
+    
+    // Allocate explosion matrices
+    orch->explosion_matrices = malloc_uncached(sizeof(T3DMat4FP*) * MAX_ENEMIES);
+    for (int i = 0; i < MAX_ENEMIES; i++) {
+        orch->explosion_matrices[i] = malloc_uncached(sizeof(T3DMat4FP));
+        t3d_mat4fp_identity(orch->explosion_matrices[i]);
+    }
+    
+    // Initialize all enemy slots
+    for (int i = 0; i < MAX_ENEMIES; i++) {
+        orch->enemies[i].matrix = malloc_uncached(sizeof(T3DMat4FP));
+        t3d_mat4fp_identity(orch->enemies[i].matrix);
+        orch->enemies[i].active = false;
+        orch->enemies[i].collision_start_index = -1;
+        orch->enemies[i].collision_count = 0;
+        orch->enemies[i].movement_phase = 0;
+        orch->enemies[i].phase_timer = 0.0f;
+        orch->enemies[i].shoot_timer = 0.0f;
+        orch->enemies[i].has_explosion = false;
+        orch->enemies[i].explosion_timer = 0.0f;
+    }
+    
+    // Load Level 5 boss model
+    orch->level5_boss_model = t3d_model_load("rom:/enemy4.t3dm");
+    if (!orch->level5_boss_model) {
+        debugf("ERROR: Failed to load enemy4.t3dm for Level 5 boss\n");
+        return;
+    }
+    
+    // Initialize boss skeleton and animation
+    const T3DChunkSkeleton* skelChunk = t3d_model_get_skeleton(orch->level5_boss_model);
+    if (skelChunk) {
+        orch->level5_boss_skeleton = malloc_uncached(sizeof(T3DSkeleton));
+        *orch->level5_boss_skeleton = t3d_skeleton_create(orch->level5_boss_model);
+        animation_system_init(&orch->level5_boss_anim, orch->level5_boss_model, orch->level5_boss_skeleton);
+        animation_system_play(&orch->level5_boss_anim, "Move", true);
+    }
+    
+    // Initialize Level 5 boss state
+    orch->level5_boss_sine_timer = 0.0f;
+    orch->level5_boss_phase = 0;  // Start with Phase 0 (MachineGun)
+    orch->level5_boss_attack_timer = 0.0f;
+    orch->level5_boss_curve_offset = 0.0f;
+    orch->level5_boss_curve_right = true;
+    orch->level5_boss_cannon_shots = 0;
+    
+    // Spawn boss in slot 0
+    EnemyInstance* boss = &orch->enemies[0];
+    boss->position = (T3DVec3){{0.0f, -100.0f, -300.0f}};
+    boss->velocity = (T3DVec3){{0.0f, 0.0f, 0.0f}};
+    
+    // Setup transform with scale 1.2
+    float scale[3] = {1.2f, 1.2f, 1.2f};
+    float rotation[3] = {0.0f, 0.0f, 0.0f};
+    float position[3] = {0.0f, -100.0f, -300.0f};
+    t3d_mat4fp_from_srt_euler(boss->matrix, scale, rotation, position);
+    
+    // Extract collision
+    int collision_before = collision_system->count;
+    collision_system_extract_from_model(collision_system, orch->level5_boss_model, "ENEMY_", COLLISION_ENEMY);
+    boss->collision_start_index = collision_before;
+    boss->collision_count = collision_system->count - collision_before;
+    collision_system_update_boxes_by_range(collision_system, boss->collision_start_index, boss->collision_count, boss->matrix);
+    
+    // Initialize with 100 HP (final boss)
+    enemy_system_init(&boss->system, 100);
+    boss->active = true;
+    boss->show_hit = false;
+    boss->hit_timer = 0.0f;
+    boss->shoot_timer = 0.0f;
+    boss->movement_phase = 0;
+    boss->phase_timer = 0.0f;
+    
+    orch->active_count = 1;
+    debugf("Level 5 Boss initialized: 100 HP\n");
+}
+
+void enemy_orchestrator_update_level5_boss(EnemyOrchestrator* orch, float delta_time, void* projectile_system_ptr) {
+    if (delta_time <= 0.0f || delta_time > 1.0f) delta_time = 0.016f;
+    
+    ProjectileSystem* ps = (ProjectileSystem*)projectile_system_ptr;
+    orch->elapsed_time += delta_time;
+    
+    if (!orch->level5_boss_model || !orch->level5_boss_skeleton) return;
+    
+    EnemyInstance* boss = &orch->enemies[0];
+    if (!boss->active) return;
+    
+    // Update animation system once per frame
+    animation_system_update(&orch->level5_boss_anim, delta_time);
+    
+    // Update health system
+    enemy_system_update(&boss->system, delta_time, &boss->show_hit, &boss->hit_timer, 
+                       orch->collision_system, boss->system.last_damage_taken);
+    
+    // Check defeat
+    if (!boss->system.active && !boss->has_explosion) {
+        boss->active = false;
+        boss->has_explosion = true;
+        boss->explosion_timer = 0.25f;
+        boss->explosion_position = boss->position;
+        orch->active_count = 0;
+        
+        float exp_scale[3] = {4.0f, 4.0f, 4.0f};
+        float exp_rotation[3] = {0.0f, 0.0f, 0.0f};
+        float exp_position[3] = {boss->explosion_position.v[0], boss->explosion_position.v[1], boss->explosion_position.v[2]};
+        t3d_mat4fp_from_srt_euler(orch->explosion_matrices[0], exp_scale, exp_rotation, exp_position);
+        return;
+    }
+    
+    // Update explosion
+    if (boss->has_explosion) {
+        boss->explosion_timer -= delta_time;
+        if (boss->explosion_timer <= 0.0f) {
+            boss->has_explosion = false;
+        }
+        return;
+    }
+    
+    // Sine wave vertical movement
+    orch->level5_boss_sine_timer += delta_time;
+    boss->position.v[1] = -100.0f + sinf(orch->level5_boss_sine_timer * 1.2f) * 40.0f;
+    
+    // Phase management
+    orch->level5_boss_attack_timer += delta_time;
+    
+    if (orch->level5_boss_phase == 0) {
+        // Phase 0: MachineGun attack with curving projectiles
+        
+        if (orch->level5_boss_attack_timer < 0.1f) {
+            // Just entered phase - play MachineGun animation
+            animation_system_play(&orch->level5_boss_anim, "MachineGun", true);
+            orch->level5_boss_curve_offset = 0.0f;
+            orch->level5_boss_curve_right = true;
+        }
+        
+        // Shoot tightly packed projectiles that curve
+        boss->shoot_timer += delta_time;
+        if (boss->shoot_timer >= 0.1f) {
+            boss->shoot_timer = 0.0f;
+            
+            // Update curve direction
+            if (orch->level5_boss_curve_right) {
+                orch->level5_boss_curve_offset += 0.08f;
+                if (orch->level5_boss_curve_offset >= 0.6f) {
+                    orch->level5_boss_curve_right = false;
+                }
+            } else {
+                orch->level5_boss_curve_offset -= 0.08f;
+                if (orch->level5_boss_curve_offset <= -0.6f) {
+                    orch->level5_boss_curve_right = true;
+                }
+            }
+            
+            // Spawn projectile with curve
+            T3DVec3 spawn_pos = {{boss->position.v[0], boss->position.v[1] + 100.0f, boss->position.v[2]}};
+            float angle = orch->level5_boss_curve_offset;
+            T3DVec3 dir = {{sinf(angle), 0.0f, cosf(angle)}};
+            t3d_vec3_norm(&dir);
+            projectile_system_spawn(ps, spawn_pos, dir, PROJECTILE_ENEMY);
+        }
+        
+        // Transition to Cannon phase after 8 seconds
+        if (orch->level5_boss_attack_timer >= 8.0f) {
+            orch->level5_boss_phase = 1;
+            orch->level5_boss_attack_timer = 0.0f;
+            orch->level5_boss_cannon_shots = 0;
+            animation_system_play(&orch->level5_boss_anim, "Cannon", false);
+        }
+        
+    } else if (orch->level5_boss_phase == 1) {
+        // Phase 1: Cannon attack - fan of 3 projectiles twice
+        
+        if (orch->level5_boss_attack_timer < 0.1f) {
+            // Just entered phase - play Cannon animation
+            animation_system_play(&orch->level5_boss_anim, "Cannon", false);
+        }
+        
+        // Shoot fan of 3 projectiles at specific intervals
+        if (orch->level5_boss_cannon_shots == 0 && orch->level5_boss_attack_timer >= 0.5f) {
+            // First shot
+            orch->level5_boss_cannon_shots = 1;
+            
+            T3DVec3 spawn_pos = {{boss->position.v[0], boss->position.v[1] + 100.0f, boss->position.v[2]}};
+            
+            // Fan of 3 projectiles
+            for (int i = 0; i < 3; i++) {
+                float angle = (i - 1) * 0.4f;  // -0.4, 0, 0.4 radians
+                T3DVec3 dir = {{sinf(angle), 0.0f, cosf(angle)}};
+                t3d_vec3_norm(&dir);
+                projectile_system_spawn(ps, spawn_pos, dir, PROJECTILE_ENEMY);
+            }
+            
+        } else if (orch->level5_boss_cannon_shots == 1 && orch->level5_boss_attack_timer >= 1.5f) {
+            // Second shot
+            orch->level5_boss_cannon_shots = 2;
+            
+            T3DVec3 spawn_pos = {{boss->position.v[0], boss->position.v[1] + 100.0f, boss->position.v[2]}};
+            
+            // Fan of 3 projectiles
+            for (int i = 0; i < 3; i++) {
+                float angle = (i - 1) * 0.4f;  // -0.4, 0, 0.4 radians
+                T3DVec3 dir = {{sinf(angle), 0.0f, cosf(angle)}};
+                t3d_vec3_norm(&dir);
+                projectile_system_spawn(ps, spawn_pos, dir, PROJECTILE_ENEMY);
+            }
+        }
+        
+        // Return to MachineGun phase after 3 seconds
+        if (orch->level5_boss_attack_timer >= 3.0f) {
+            orch->level5_boss_phase = 0;
+            orch->level5_boss_attack_timer = 0.0f;
+            animation_system_play(&orch->level5_boss_anim, "Move", true);
+        }
+    }
+    
+    // Update transform
+    float scale[3] = {1.2f, 1.2f, 1.2f};
+    float rotation[3] = {0.0f, 0.0f, 0.0f};
+    float position[3] = {boss->position.v[0], boss->position.v[1], boss->position.v[2]};
+    t3d_mat4fp_from_srt_euler(boss->matrix, scale, rotation, position);
+    
+    // Update collision
+    collision_system_update_boxes_by_range(orch->collision_system, 
+                                          boss->collision_start_index, 
+                                          boss->collision_count, 
+                                          boss->matrix);
+}
+
+T3DModel* enemy_orchestrator_get_level5_boss_model(EnemyOrchestrator* orch) {
+    return orch->level5_boss_model;
+}
+
+T3DSkeleton* enemy_orchestrator_get_level5_boss_skeleton(EnemyOrchestrator* orch) {
+    return orch->level5_boss_skeleton;
 }

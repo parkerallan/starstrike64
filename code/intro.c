@@ -198,6 +198,7 @@ void intro_render(SceneIntro* scene) {
 
 void intro_cleanup(SceneIntro* scene) {
     // Stop and close music
+    mixer_ch_stop(0);
     wav64_close(&scene->music);
 
     // Cleanup animation system

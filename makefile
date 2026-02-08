@@ -6,7 +6,8 @@ DEBUG = 1
 BUILD_DIR = build
 SRC_DIR = code
 
-SRC = $(SRC_DIR)/main.c \
+SRC = $(SRC_DIR)/startup.c \
+			$(SRC_DIR)/main.c \
       $(SRC_DIR)/intro.c \
       $(SRC_DIR)/level1.c \
       $(SRC_DIR)/level2.c \

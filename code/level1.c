@@ -194,7 +194,7 @@ int level1_update(Level1* level) {
     }
 
     // Handle input
-    joypad_buttons_t btn = joypad_get_buttons_pressed(JOYPAD_PORT_1);
+    //joypad_buttons_t btn = joypad_get_buttons_pressed(JOYPAD_PORT_1);
     joypad_buttons_t btn_held = joypad_get_buttons_held(JOYPAD_PORT_1);
     joypad_inputs_t inputs = joypad_get_inputs(JOYPAD_PORT_1);
     
@@ -333,10 +333,10 @@ skip_to_camera:
     }
     
     // Start button - go to next level
-    if (btn.start) {
-        debugf("Going to Level 2\n");
-        return LEVEL_2;
-    }
+    // if (btn.start) {
+    //     debugf("Going to Level 2\n");
+    //     return LEVEL_2;
+    // }
 
     // Set up camera
     const T3DVec3 camPos = {{0, 0.0f, 200.0f}};
@@ -560,6 +560,7 @@ void level1_cleanup(Level1* level) {
     
     collision_system_cleanup(&level->collision_system);
 
+    mixer_ch_stop(0);
     wav64_close(&level->music);
     rdpq_text_unregister_font(1);
 }

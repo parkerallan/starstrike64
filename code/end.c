@@ -137,5 +137,6 @@ void end_cleanup(SceneEnd* scene) {
     debugf("End scene cleanup\n");
     // Unregister font (don't free it as it's not owned by this scene)
     rdpq_text_unregister_font(1);
+    mixer_ch_stop(0);
     wav64_close(&scene->music);
 }
